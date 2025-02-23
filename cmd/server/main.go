@@ -20,12 +20,12 @@ type db interface {
 	UpdateHandler()
 }
 
-// обработчик Update
+// обработчик /update/
 func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	wrongmetricvalue := func() {
 		msg := fmt.Sprintf("Запрос с некорректным типом метрики или значением.\n%s\n", r.URL)
-		http.Error(w, msg, http.StatusNotFound)
+		http.Error(w, msg, http.StatusBadRequest)
 	}
 	wrongmetricname := func() {
 		msg := fmt.Sprintf("Отсутствует имя метрики в запросе.\n%s\n", r.URL)
