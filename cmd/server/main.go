@@ -16,12 +16,12 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
-func (db MemStorage) WriteCounter(MetricName string, MetricValue counter) {
-	db.Cdb[MetricName] += MetricValue
+type db interface {
+	UpdateHandler()
 }
 
 // обработчик Update
-func UpdateHandler(w http.ResponseWriter, r *http.Request) {
+func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	wrongmetricvalue := func() {
 		msg := fmt.Sprintf("Запрос с некорректным типом метрики или значением.\n%s\n", r.URL)
@@ -50,7 +50,7 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var metricvalue gauge = gauge(value)
-		// db.Gdb[metricname] = metricvalue
+		db.Gdb[metricname] = metricvalue
 		fmt.Printf("тип метрики gauge, имя метрики %s, значение %f\n", metricname, metricvalue)
 	case "counter":
 		value, err := strconv.Atoi(metricvalue)
@@ -59,8 +59,9 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var metricvalue counter = counter(value)
-		// db.Cdb[metricname] += metricvalue
+		db.Cdb[metricname] += metricvalue
 		fmt.Printf("тип метрики counter, имя метрики %s, значение %d\n", metricname, metricvalue)
+		fmt.Printf("значение метрики %s в DB: %d\n", metricname, db.Cdb[metricname])
 	default:
 		wrongmetricvalue()
 		return
@@ -69,12 +70,12 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
-	// db := MemStorage{
-	// 	Gdb: make(map[string]gauge),
-	// 	Cdb: make(map[string]counter),
-	// }
+	db := MemStorage{
+		Gdb: make(map[string]gauge),
+		Cdb: make(map[string]counter),
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/update/", UpdateHandler)
+	mux.HandleFunc("/update/", db.UpdateHandler)
 	log.Fatal(http.ListenAndServe("localhost:8080", mux))
 }
