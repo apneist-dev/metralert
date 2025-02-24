@@ -53,7 +53,7 @@ func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			wrongmetricvalue()
 			return
 		}
-		var metricvalue gauge = gauge(value)
+		var metricvalue = gauge(value)
 		db.Gdb[metricname] = metricvalue
 		fmt.Printf("тип метрики gauge, имя метрики %s, значение %f\n", metricname, metricvalue)
 	case "counter":
@@ -62,7 +62,7 @@ func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			wrongmetricvalue()
 			return
 		}
-		var metricvalue counter = counter(value)
+		var metricvalue = counter(value)
 		db.Cdb[metricname] += metricvalue
 		fmt.Printf("тип метрики counter, имя метрики %s, значение %d\n", metricname, metricvalue)
 		fmt.Printf("значение метрики %s в DB: %d\n", metricname, db.Cdb[metricname])
