@@ -16,7 +16,7 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
-type db interface {
+type Updater interface {
 	UpdateHandler()
 }
 
@@ -32,6 +32,10 @@ func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusNotFound)
 	}
 	// fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
 	path, _ := strings.CutPrefix(r.URL.Path, "/update/")
 	params := strings.Split(path, "/")
