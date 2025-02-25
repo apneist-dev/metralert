@@ -16,60 +16,76 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
-type Updater interface {
-	UpdateHandler()
+func (db MemStorage) SaveGaugeMetric(metricname string, metricvalue gauge) {
+	db.Gdb[metricname] = metricvalue
 }
 
-// обработчик /update/
-func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+func (db MemStorage) SaveCounterMetric(metricname string, metricvalue counter) {
+	db.Cdb[metricname] += metricvalue
+}
 
-	wrongmetricvalue := func() {
-		msg := fmt.Sprintf("Запрос с некорректным типом метрики или значением.\n%s\n", r.URL)
-		http.Error(w, msg, http.StatusBadRequest)
-	}
-	wrongmetricname := func() {
-		msg := fmt.Sprintf("Отсутствует имя метрики в запросе.\n%s\n", r.URL)
-		http.Error(w, msg, http.StatusNotFound)
+func MainHandler(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+}
+
+// обработчик counter
+func (db MemStorage) CounterUpdateHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
 	}
 	// fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
-	path, _ := strings.CutPrefix(r.URL.Path, "/update/")
+	path, _ := strings.CutPrefix(r.URL.Path, "/update/counter/")
 	params := strings.Split(path, "/")
 	//проверяем Path
-	if len(params) != 3 {
-		wrongmetricname()
+	if len(params) != 2 {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
 
-	metrictype, metricname, metricvalue := params[0], params[1], params[2]
-	switch metrictype {
-	case "gauge":
-		value, err := strconv.ParseFloat(metricvalue, 64)
-		if err != nil {
-			wrongmetricvalue()
-			return
-		}
-		var metricvalue = gauge(value)
-		db.Gdb[metricname] = metricvalue
-		fmt.Printf("тип метрики gauge, имя метрики %s, значение %f\n", metricname, metricvalue)
-	case "counter":
-		value, err := strconv.Atoi(metricvalue)
-		if err != nil {
-			wrongmetricvalue()
-			return
-		}
-		var metricvalue = counter(value)
-		db.Cdb[metricname] += metricvalue
-		fmt.Printf("тип метрики counter, имя метрики %s, значение %d\n", metricname, metricvalue)
-		fmt.Printf("значение метрики %s в DB: %d\n", metricname, db.Cdb[metricname])
-	default:
-		wrongmetricvalue()
+	metricname, metricvalue := params[0], params[1]
+	value, err := strconv.Atoi(metricvalue)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+	var countermetricvalue = counter(value)
+	db.SaveCounterMetric(metricname, countermetricvalue)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, countermetricvalue)
+	fmt.Fprintf(w, "Значение метрики в DB: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, db.Cdb[metricname])
+}
+
+// обработчик gauge
+func (db MemStorage) GaugeUpdateHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	// fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
+
+	path, _ := strings.CutPrefix(r.URL.Path, "/update/gauge/")
+	params := strings.Split(path, "/")
+	//проверяем Path
+	if len(params) != 2 {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+
+	metricname, metricvalue := params[0], params[1]
+	value, err := strconv.ParseFloat(metricvalue, 64)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	var gaugemetricvalue = gauge(value)
+	db.SaveGaugeMetric(metricname, gaugemetricvalue)
+	fmt.Fprintf(w, "Принята метрика: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, gaugemetricvalue)
+	fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, db.Gdb[metricname])
 }
 
 func main() {
@@ -80,6 +96,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/update/", db.UpdateHandler)
+	mux.HandleFunc("/update/counter/", db.CounterUpdateHandler)
+	mux.HandleFunc("/update/gauge/", db.GaugeUpdateHandler)
+	mux.HandleFunc("/", MainHandler)
 	log.Fatal(http.ListenAndServe("localhost:8080", mux))
 }
