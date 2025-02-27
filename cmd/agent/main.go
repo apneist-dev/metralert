@@ -25,9 +25,6 @@ var (
 
 func main() {
 
-	// pollInterval := 2
-	// e := &endpoints
-
 	go CollectMetric()
 	go SendAllMetrics()
 
