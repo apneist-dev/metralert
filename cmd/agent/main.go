@@ -67,14 +67,14 @@ func CollectMetric() {
 		result = append(result, endpointpollcounter)
 
 		PollCount += counter(1)
-		fmt.Println("PollCount:", PollCount)
+		// fmt.Println("PollCount:", PollCount)
 
 		time.Sleep(time.Duration(PollInterval) * time.Second)
 
 		mutex.Lock()
 		endpoints = result[:]
 		mutex.Unlock()
-		fmt.Println(len(endpoints), "metrics collected")
+		// fmt.Println(len(endpoints), "metrics collected")
 	}
 }
 
@@ -85,7 +85,7 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 		return resp, err
 	}
 	defer resp.Body.Close()
-	fmt.Println(resp.StatusCode)
+	// fmt.Println(resp.StatusCode)
 	return resp, nil
 }
 
@@ -106,7 +106,7 @@ func (c Client) SendAllMetrics() error {
 		}
 		mutex.Unlock()
 		time.Sleep(time.Duration(ReportInterval) * time.Second)
-		fmt.Println("SendAllMetrics finished")
+		// fmt.Println("SendAllMetrics finished")
 	}
 	return err
 }
