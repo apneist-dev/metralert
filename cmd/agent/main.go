@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -88,17 +89,25 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 	return resp, nil
 }
 
-func (c Client) SendAllMetrics() {
-	for {
+func (c Client) SendAllMetrics() error {
+	var err error
+	for err == nil {
 		mutex.Lock()
+		if len(endpoints) == 0 {
+			err = errors.New("nothing to send")
+		}
 		for _, s := range endpoints {
-			c.SendPost(s)
+			_, err = c.SendPost(s)
+			if err != nil {
+				return err
+			}
 			fmt.Println(s)
 		}
 		mutex.Unlock()
 		time.Sleep(time.Duration(ReportInterval) * time.Second)
-		fmt.Println("Metrics sent")
+		fmt.Println("SendAllMetrics finished")
 	}
+	return err
 }
 
 // func SendAllMetrics

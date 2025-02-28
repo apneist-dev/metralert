@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -66,6 +67,57 @@ func TestClient_SendPost(t *testing.T) {
 				return
 			}
 			assert.Equal(t, test.want.code, got.StatusCode)
+		})
+	}
+}
+
+func TestClient_SendAllMetrics(t *testing.T) {
+	type fields struct {
+		url       string
+		endpoints []string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		wantErr bool
+	}{
+		{
+			name: "SendAllMetrics #1 err",
+			fields: fields{
+				url:       "htt1p://ll:8080",
+				endpoints: []string{"http://localhost:8080/update/gauge/RandomValue/1232131"},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoints := tt.fields.endpoints
+			c := Client{
+				url: tt.fields.url,
+			}
+			if err := c.SendAllMetrics(); (err != nil) != tt.wantErr {
+				t.Errorf("For endpoints %s Client.SendAllMetrics() error = %v, wantErr %v", endpoints, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCollectMetric(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoints []string
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var endpoints = tt.endpoints
+			CollectMetric()
+			time.Sleep(15 * time.Second)
+			if len(endpoints) == 0 {
+				t.Error("CollectMetrics collected 0 metrics")
+			}
 		})
 	}
 }
