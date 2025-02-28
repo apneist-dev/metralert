@@ -8,12 +8,30 @@ import (
 	"strings"
 )
 
+var (
+	serverurl = "http://localhost:8080"
+)
+
 type gauge float64
 type counter int64
 
 type MemStorage struct {
 	Gdb map[string]gauge
 	Cdb map[string]counter
+}
+
+func main() {
+
+	db := MemStorage{
+		Gdb: make(map[string]gauge),
+		Cdb: make(map[string]counter),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/update/counter/", db.CounterUpdateHandler)
+	mux.HandleFunc("/update/gauge/", db.GaugeUpdateHandler)
+	mux.HandleFunc("/", MainHandler)
+	log.Fatal(http.ListenAndServe(serverurl, mux))
 }
 
 func (db MemStorage) SaveGaugeMetric(metricname string, metricvalue gauge) {
@@ -86,18 +104,4 @@ func (db MemStorage) GaugeUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	db.SaveGaugeMetric(metricname, gaugemetricvalue)
 	fmt.Fprintf(w, "Принята метрика: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, gaugemetricvalue)
 	fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, db.Gdb[metricname])
-}
-
-func main() {
-
-	db := MemStorage{
-		Gdb: make(map[string]gauge),
-		Cdb: make(map[string]counter),
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/update/counter/", db.CounterUpdateHandler)
-	mux.HandleFunc("/update/gauge/", db.GaugeUpdateHandler)
-	mux.HandleFunc("/", MainHandler)
-	log.Fatal(http.ListenAndServe("localhost:8080", mux))
 }

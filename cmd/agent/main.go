@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -49,11 +48,11 @@ func CollectMetric() {
 			var endpoint string
 			switch {
 			case k.Type == reflect.TypeFor[uint64]():
-				endpoint = fmt.Sprintf("%s%s%s/%d", serverurl, "/update/gauge/", k.Name, value.Interface().(uint64))
+				endpoint = fmt.Sprintf("%s%s/%d", "/update/gauge/", k.Name, value.Interface().(uint64))
 			case k.Type == reflect.TypeFor[uint32]():
-				endpoint = fmt.Sprintf("%s%s%s/%d", serverurl, "/update/gauge/", k.Name, value.Interface().(uint32))
+				endpoint = fmt.Sprintf("%s%s/%d", "/update/gauge/", k.Name, value.Interface().(uint32))
 			case k.Type == reflect.TypeFor[float64]():
-				endpoint = fmt.Sprintf("%s%s%s/%f", serverurl, "/update/gauge/", k.Name, value.Interface().(float64))
+				endpoint = fmt.Sprintf("%s%s/%f", "/update/gauge/", k.Name, value.Interface().(float64))
 			}
 			if endpoint != "" {
 				result = append(result, endpoint)
@@ -61,9 +60,9 @@ func CollectMetric() {
 		}
 
 		RandomValue = gauge(rand.Float64())
-		endpointrandom := fmt.Sprintf("%s%s%s/%f", serverurl, "/update/gauge/", "RandomValue", RandomValue)
+		endpointrandom := fmt.Sprintf("%s%s/%f", "/update/gauge/", "RandomValue", RandomValue)
 		result = append(result, endpointrandom)
-		endpointpollcounter := fmt.Sprintf("%s%s%s/%d", serverurl, "/update/counter/", "PollCount", PollCount)
+		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", PollCount)
 		result = append(result, endpointpollcounter)
 
 		PollCount += counter(1)
@@ -74,14 +73,16 @@ func CollectMetric() {
 		mutex.Lock()
 		endpoints = result[:]
 		mutex.Unlock()
-		// fmt.Println(len(endpoints), "metrics collected")
+		fmt.Println(len(endpoints), "metrics collected")
 	}
 }
 
 func (c Client) SendPost(endpoint string) (*http.Response, error) {
-	resp, err := http.Post(endpoint, "text/plain", http.NoBody)
+	url := serverurl + "/" + endpoint
+	// fmt.Println(url)
+	resp, err := http.Post(url, "text/plain", http.NoBody)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return resp, err
 	}
 	defer resp.Body.Close()
@@ -90,25 +91,20 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 }
 
 func (c Client) SendAllMetrics() error {
-	var err error
-	for err == nil {
+	for {
 		mutex.Lock()
-		if len(endpoints) == 0 {
-			err = errors.New("nothing to send")
-		}
 		for _, s := range endpoints {
 			resp, err := c.SendPost(s)
 			if err != nil {
 				return err
 			}
-			fmt.Println(s)
+			// fmt.Println(s)
 			defer resp.Body.Close()
 		}
 		mutex.Unlock()
 		time.Sleep(time.Duration(ReportInterval) * time.Second)
 		// fmt.Println("SendAllMetrics finished")
 	}
-	return err
 }
 
 // func SendAllMetrics
