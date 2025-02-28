@@ -97,11 +97,12 @@ func (c Client) SendAllMetrics() error {
 			err = errors.New("nothing to send")
 		}
 		for _, s := range endpoints {
-			_, err = c.SendPost(s)
+			resp, err := c.SendPost(s)
 			if err != nil {
 				return err
 			}
 			fmt.Println(s)
+			defer resp.Body.Close()
 		}
 		mutex.Unlock()
 		time.Sleep(time.Duration(ReportInterval) * time.Second)

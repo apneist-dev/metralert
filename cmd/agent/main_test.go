@@ -67,6 +67,7 @@ func TestClient_SendPost(t *testing.T) {
 				return
 			}
 			assert.Equal(t, test.want.code, got.StatusCode)
+			defer got.Body.Close()
 		})
 	}
 }
