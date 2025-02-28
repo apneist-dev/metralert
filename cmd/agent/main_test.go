@@ -46,7 +46,7 @@ func TestClient_SendPost(t *testing.T) {
 			name:   "positive test #1",
 			fields: fields{url: "http://localhost:8080"},
 			args: args{
-				endpoint: "http://localhost:8080/update/gauge/RandomValue/1232131",
+				endpoint: "/update/gauge/RandomValue/1232131",
 			},
 			want: want{
 				code:        200,
@@ -86,7 +86,7 @@ func TestClient_SendAllMetrics(t *testing.T) {
 			name: "SendAllMetrics #1 err",
 			fields: fields{
 				url:       "htt1p://ll:8080",
-				endpoints: []string{"http://localhost:8080/update/gauge/RandomValue/1232131"},
+				endpoints: []string{"/update/gauge/RandomValue/1232131"},
 			},
 			wantErr: true,
 		},

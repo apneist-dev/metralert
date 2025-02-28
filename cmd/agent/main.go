@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -78,7 +80,7 @@ func CollectMetric() {
 }
 
 func (c Client) SendPost(endpoint string) (*http.Response, error) {
-	url := serverurl + "/" + endpoint
+	url := serverurl + endpoint
 	// fmt.Println(url)
 	resp, err := http.Post(url, "text/plain", http.NoBody)
 	if err != nil {
@@ -91,6 +93,9 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 }
 
 func (c Client) SendAllMetrics() error {
+	if !strings.Contains(c.url, "http") {
+		return errors.New("no http in url")
+	}
 	for {
 		mutex.Lock()
 		for _, s := range endpoints {
