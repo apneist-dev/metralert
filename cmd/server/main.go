@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	serverurl = "http://localhost:8080"
+	serverurl = "localhost:8080"
 )
 
 type gauge float64
