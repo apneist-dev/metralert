@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -20,8 +20,9 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
-func main() {
+type Server struct{ url string }
 
+func NewServer(url string) Server {
 	db := MemStorage{
 		Gdb: make(map[string]gauge),
 		Cdb: make(map[string]counter),
@@ -32,7 +33,13 @@ func main() {
 	mux.HandleFunc("/update/gauge/", db.GaugeUpdateHandler)
 	mux.HandleFunc("/", MainHandler)
 	log.Fatal(http.ListenAndServe(serverurl, mux))
+	return Server{url}
 }
+
+// func main() {
+// 	NewServer(serverurl)
+
+// }
 
 func (db MemStorage) SaveGaugeMetric(metricname string, metricvalue gauge) {
 	db.Gdb[metricname] = metricvalue

@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"errors"
@@ -29,13 +29,13 @@ type Client struct{ url string }
 
 func NewClient(url string) Client { return Client{url} }
 
-func main() {
-	client := NewClient(serverurl)
-	go CollectMetric()
-	go client.SendAllMetrics()
+// func main() {
+// 	client := NewClient(serverurl)
+// 	go CollectMetric()
+// 	go client.SendAllMetrics()
 
-	select {}
-}
+// 	select {}
+// }
 
 // определяем поля структуры MemStats и создаём слайс url
 func CollectMetric() {
@@ -103,7 +103,7 @@ func (c Client) SendAllMetrics() error {
 			if err != nil {
 				return err
 			}
-			// fmt.Println(s)
+			fmt.Println("sent")
 			defer resp.Body.Close()
 		}
 		mutex.Unlock()

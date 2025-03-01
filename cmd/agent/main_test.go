@@ -1,8 +1,10 @@
-package main
+package agent
 
 import (
 	"testing"
 	"time"
+
+	"metralert/cmd/server"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -35,6 +37,8 @@ func TestClient_SendPost(t *testing.T) {
 		response    string
 		contentType string
 	}
+	var serverurl string = "http://localhost:8080"
+
 	tests := []struct {
 		name    string
 		fields  fields
@@ -43,7 +47,7 @@ func TestClient_SendPost(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "positive test #1",
+			name:   "SendPost test #1",
 			fields: fields{url: "http://localhost:8080"},
 			args: args{
 				endpoint: "/update/gauge/RandomValue/1232131",
@@ -56,6 +60,9 @@ func TestClient_SendPost(t *testing.T) {
 			wantErr: false,
 		},
 	}
+
+	go server.NewServer(serverurl)
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			c := Client{
@@ -91,6 +98,10 @@ func TestClient_SendAllMetrics(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
+	var serverurl string = "http://localhost:8080"
+	go server.NewServer(serverurl)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			endpoints := tt.fields.endpoints
@@ -111,6 +122,9 @@ func TestCollectMetric(t *testing.T) {
 	}{
 		// TODO: Add test cases.
 	}
+	var serverurl string = "http://localhost:8080"
+	go server.NewServer(serverurl)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var endpoints = tt.endpoints
