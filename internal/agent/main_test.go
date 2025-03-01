@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"metralert/cmd/server"
+	"metralert/internal/server"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -37,7 +37,6 @@ func TestClient_SendPost(t *testing.T) {
 		response    string
 		contentType string
 	}
-	var serverurl string = "http://localhost:8080"
 
 	tests := []struct {
 		name    string
@@ -60,7 +59,7 @@ func TestClient_SendPost(t *testing.T) {
 			wantErr: false,
 		},
 	}
-
+	serverurl := "http://localhost:8080"
 	go server.NewServer(serverurl)
 
 	for _, test := range tests {
@@ -99,7 +98,7 @@ func TestClient_SendAllMetrics(t *testing.T) {
 		},
 	}
 
-	var serverurl string = "http://localhost:8080"
+	serverurl := "http://localhost:8080"
 	go server.NewServer(serverurl)
 
 	for _, tt := range tests {
@@ -122,7 +121,7 @@ func TestCollectMetric(t *testing.T) {
 	}{
 		// TODO: Add test cases.
 	}
-	var serverurl string = "http://localhost:8080"
+	serverurl := "http://localhost:8080"
 	go server.NewServer(serverurl)
 
 	for _, tt := range tests {
