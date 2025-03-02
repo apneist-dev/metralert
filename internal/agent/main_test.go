@@ -9,22 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// func TestClientSendAllMetrics(t *testing.T) {
-// 	// Dummy JSON response
-// 	expected := "{'data': 'dummy'}"
-// 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, expected) }))
-// 	defer svr.Close()
-// 	c := NewClient(svr.URL)
-// 	res, err := c.SendPost()
-// 	if err != nil {
-// 		t.Errorf("expected err to be nil got %v", err)
-// 	}
-// 	res = strings.TrimSpace(res)
-// 	if res != expected {
-// 		t.Errorf("expected res to be %s got %s", expected, res)
-// 	}
-// }
-
 func TestClient_SendPost(t *testing.T) {
 	type fields struct {
 		url string

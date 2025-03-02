@@ -1,0 +1,4 @@
+<h1>{{.Header}}</h1>
+{{ range $key, $value := . }}
+<li><strong>{{ $key }}</strong>: {{ $value }}</li>
+{{ end }}

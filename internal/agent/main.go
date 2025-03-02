@@ -29,15 +29,7 @@ type Client struct{ url string }
 
 func NewClient(url string) Client { return Client{url} }
 
-// func main() {
-// 	client := NewClient(serverurl)
-// 	go CollectMetric()
-// 	go client.SendAllMetrics()
-
-// 	select {}
-// }
-
-// определяем поля структуры MemStats и создаём слайс url
+// определяем поля структуры MemStats, итерируемся по ним и создаём слайс url
 func CollectMetric() {
 	for {
 		var RandomValue gauge
@@ -68,7 +60,6 @@ func CollectMetric() {
 		result = append(result, endpointpollcounter)
 
 		PollCount += counter(1)
-		// fmt.Println("PollCount:", PollCount)
 
 		time.Sleep(time.Duration(PollInterval) * time.Second)
 
@@ -103,7 +94,7 @@ func (c Client) SendAllMetrics() error {
 			if err != nil {
 				return err
 			}
-			fmt.Println("sent")
+			fmt.Println(resp.StatusCode)
 			defer resp.Body.Close()
 		}
 		mutex.Unlock()
@@ -111,5 +102,3 @@ func (c Client) SendAllMetrics() error {
 		// fmt.Println("SendAllMetrics finished")
 	}
 }
-
-// func SendAllMetrics
