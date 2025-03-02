@@ -12,128 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMemStorage_GaugeUpdateHandler(t *testing.T) {
+func TestMemStorage_UpdateHandler(t *testing.T) {
 	type want struct {
 		code        int
 		response    string
 		contentType string
 	}
 	type args struct {
-		metricname  string
-		metricvalue string
-		url         string
-		method      string
-	}
-	db := MemStorage{
-		Gdb: make(map[string]gauge),
-		Cdb: make(map[string]counter),
-	}
-	tests := []struct {
-		name string
-		args args
-		want want
-	}{
-		{
-			name: "Gauge test #1 StatusOK",
-			args: args{
-				metricname:  "TestGauge",
-				metricvalue: "123.232323",
-				url:         "/update/gauge/{metricname}/{metricvalue}",
-				method:      http.MethodPost,
-			},
-			want: want{
-				code:        200,
-				response:    `{"status":"ok"}`,
-				contentType: "text/plain; charset=utf-8",
-			},
-		},
-		// {
-		// 	name: "Gauge test #1 StatusOK",
-		// 	args: args{
-		// 		url:    "/update/gauge/TestGauge/123.232323",
-		// 		method: http.MethodPost,
-		// 	},
-		// 	want: want{
-		// 		code:        200,
-		// 		response:    `{"status":"ok"}`,
-		// 		contentType: "text/plain",
-		// 	},
-		// },
-		{
-			name: "Gauge test #2 StatusOK",
-			args: args{
-				metricname:  "TestGauge",
-				metricvalue: "123.231",
-				url:         "/update/gauge/{metricname}/{metricvalue}",
-				method:      http.MethodPost,
-			},
-			want: want{
-				code:        200,
-				response:    `{"status":"ok"}`,
-				contentType: "text/plain; charset=utf-8",
-			},
-		},
-		{
-			name: "Gauge test #3 BadRequest",
-			args: args{
-				metricname:  "TestGauge",
-				metricvalue: "-12s3.4343",
-				url:         "/update/gauge/{metricname}/{metricvalue}",
-				method:      http.MethodPost,
-			},
-			want: want{
-				code:        400,
-				response:    `{"status":"Bad Request"}`,
-				contentType: "text/plain",
-			},
-		},
-		{
-			name: "Gauge test #3 BadRequest",
-			args: args{
-				metricname:  "TestGauge",
-				metricvalue: "-1.323223/23432/2323",
-				url:         "/update/gauge/{metricname}/{metricvalue}",
-				method:      http.MethodPost,
-			},
-			want: want{
-				code:        400,
-				response:    `{"status":"BadRequest"}`,
-				contentType: "text/plain",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-
-			request := httptest.NewRequest(tt.args.method, tt.args.url, nil)
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("metricname", tt.args.metricname)
-			rctx.URLParams.Add("metricvalue", tt.args.metricvalue)
-			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
-			// создаём новый Recorder
-			w := httptest.NewRecorder()
-
-			db.GaugeUpdateHandler(w, request)
-
-			res := w.Result()
-			// проверяем код ответа
-			assert.Equal(t, tt.want.code, res.StatusCode)
-			// получаем и проверяем тело запроса
-			defer res.Body.Close()
-			_, err := io.ReadAll(res.Body)
-			require.NoError(t, err)
-
-		})
-	}
-}
-
-func TestMemStorage_CounterUpdateHandler(t *testing.T) {
-	type want struct {
-		code        int
-		response    string
-		contentType string
-	}
-	type args struct {
+		metrictype  string
 		metricname  string
 		metricvalue string
 		url         string
@@ -151,9 +37,10 @@ func TestMemStorage_CounterUpdateHandler(t *testing.T) {
 		{
 			name: "Counter test #1 StatusOK",
 			args: args{
+				metrictype:  "counter",
 				metricname:  "PollCount",
 				metricvalue: "123",
-				url:         "/update/counter/{metricname}/{metricvalue}",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
 				method:      http.MethodPost,
 			},
 			want: want{
@@ -165,14 +52,75 @@ func TestMemStorage_CounterUpdateHandler(t *testing.T) {
 		{
 			name: "Counter test #2",
 			args: args{
+				metrictype:  "counter",
 				metricname:  "PollCount",
 				metricvalue: "-123.4343",
-				url:         "/update/counter/{metricname}/{metricvalue}",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
 				method:      http.MethodPost,
 			},
 			want: want{
 				code:        400,
 				response:    `{"status":"Bad Request"}`,
+				contentType: "text/plain",
+			},
+		},
+		{
+			name: "Gauge test #1 StatusOK",
+			args: args{
+				metrictype:  "gauge",
+				metricname:  "TestGauge",
+				metricvalue: "123.232323",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
+				method:      http.MethodPost,
+			},
+			want: want{
+				code:        200,
+				response:    `{"status":"ok"}`,
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name: "Gauge test #2 StatusOK",
+			args: args{
+				metrictype:  "gauge",
+				metricname:  "TestGauge",
+				metricvalue: "123.231",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
+				method:      http.MethodPost,
+			},
+			want: want{
+				code:        200,
+				response:    `{"status":"ok"}`,
+				contentType: "text/plain; charset=utf-8",
+			},
+		},
+		{
+			name: "Gauge test #3 BadRequest",
+			args: args{
+				metrictype:  "gauge",
+				metricname:  "TestGauge",
+				metricvalue: "-12s3.4343",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
+				method:      http.MethodPost,
+			},
+			want: want{
+				code:        400,
+				response:    `{"status":"Bad Request"}`,
+				contentType: "text/plain",
+			},
+		},
+		{
+			name: "Gauge test #3 BadRequest",
+			args: args{
+				metrictype:  "gauge",
+				metricname:  "TestGauge",
+				metricvalue: "-1.323223/23432/2323",
+				url:         "/update/{metrictype}/{metricname}/{metricvalue}",
+				method:      http.MethodPost,
+			},
+			want: want{
+				code:        400,
+				response:    `{"status":"BadRequest"}`,
 				contentType: "text/plain",
 			},
 		},
@@ -182,13 +130,14 @@ func TestMemStorage_CounterUpdateHandler(t *testing.T) {
 
 			request := httptest.NewRequest(tt.args.method, tt.args.url, nil)
 			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("metrictype", tt.args.metrictype)
 			rctx.URLParams.Add("metricname", tt.args.metricname)
 			rctx.URLParams.Add("metricvalue", tt.args.metricvalue)
 			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
 			// создаём новый Recorder
 			w := httptest.NewRecorder()
 
-			db.CounterUpdateHandler(w, request)
+			db.UpdateHandler(w, request)
 
 			res := w.Result()
 			// проверяем код ответа
