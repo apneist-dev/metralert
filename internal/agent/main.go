@@ -22,7 +22,6 @@ var (
 	ReportInterval int      = 10
 	PollCount      counter
 	rtm            runtime.MemStats
-	// serverurl      = "http://localhost:8081"
 )
 
 type Client struct {
@@ -31,13 +30,14 @@ type Client struct {
 	reportInterval int
 }
 
+// Конструктор агента
 func NewClient(url string, pollInterval int, reportInterval int) Client {
 	return Client{url,
 		pollInterval,
 		reportInterval}
 }
 
-// определяем поля структуры MemStats, итерируемся по ним и создаём слайс url
+// Сбор метрик MemStats
 func CollectMetric() {
 	for {
 		var RandomValue gauge
@@ -64,6 +64,7 @@ func CollectMetric() {
 		RandomValue = gauge(rand.Float64())
 		endpointrandom := fmt.Sprintf("%s%s/%f", "/update/gauge/", "RandomValue", RandomValue)
 		result = append(result, endpointrandom)
+
 		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", PollCount)
 		result = append(result, endpointpollcounter)
 
@@ -74,10 +75,12 @@ func CollectMetric() {
 		mutex.Lock()
 		endpoints = result[:]
 		mutex.Unlock()
+
 		log.Println(len(endpoints), "метрик собрано")
 	}
 }
 
+// Отправка одного запроса Post
 func (c Client) SendPost(endpoint string) (*http.Response, error) {
 	url := ""
 	if !strings.Contains(c.url, "http") {
@@ -85,21 +88,16 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 	} else {
 		url = c.url + endpoint
 	}
-	// fmt.Println(url)
 	resp, err := http.Post(url, "text/plain", http.NoBody)
 	if err != nil {
-		// fmt.Println(err)
 		return resp, err
 	}
 	defer resp.Body.Close()
-	// fmt.Println(resp.StatusCode)
 	return resp, nil
 }
 
+// Отправка всех метрик
 func (c Client) SendAllMetrics() error {
-	// if !strings.Contains(c.url, "http") {
-	// 	return errors.New("no http in url")
-	// }
 	for {
 		mutex.Lock()
 		for _, s := range endpoints {
@@ -112,6 +110,5 @@ func (c Client) SendAllMetrics() error {
 		}
 		mutex.Unlock()
 		time.Sleep(time.Duration(ReportInterval) * time.Second)
-		// fmt.Println("SendAllMetrics finished")
 	}
 }

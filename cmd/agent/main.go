@@ -10,16 +10,18 @@ import (
 )
 
 func main() {
-	// serverurl := "localhost:8080"
 	type Config struct {
 		ServerAddress  string `env:"ADDRESS"`
 		ReportInterval int    `env:"REPORT_INTERVAL"`
 		PollInterval   int    `env:"pollInterval"`
 	}
-	var cfg Config
-	var serverurl *string
-	var reportInterval *int
-	var pollInterval *int
+	var (
+		cfg            Config
+		serverurl      *string
+		reportInterval *int
+		pollInterval   *int
+	)
+
 	err := env.Parse(&cfg)
 	if err != nil {
 		fmt.Println("Переменная окружения ADDRESS не определена")
@@ -42,9 +44,8 @@ func main() {
 		pollInterval = &cfg.PollInterval
 	}
 
-	// reportInterval := flag.Int("r", 10, "reportInterval")
-	// pollInterval := flag.Int("p", 2, "pollInterval")
 	flag.Parse()
+
 	log.Printf("Запущен сервер с адресом %s", *serverurl)
 	client := agent.NewClient(*serverurl, *pollInterval, *reportInterval)
 	go agent.CollectMetric()

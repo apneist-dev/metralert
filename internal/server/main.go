@@ -19,13 +19,14 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
+var db = MemStorage{
+	Gdb: make(map[string]gauge),
+	Cdb: make(map[string]counter),
+}
+
 type Server struct{ url string }
 
 func NewServer(url string) Server {
-	db := MemStorage{
-		Gdb: make(map[string]gauge),
-		Cdb: make(map[string]counter),
-	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -51,16 +52,12 @@ func (db MemStorage) SaveCounterMetric(metricname string, metricvalue counter) {
 	db.Cdb[metricname] += metricvalue
 }
 
-// post default handler
+// Обработчик для Post "/"
 func PostMainHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
 
-func UnknownUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-}
-
-// print all metrics
+// Обработчик для вывод всех метрик
 func (db MemStorage) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 	// Output := struct {
 	// 	Header     string
@@ -81,7 +78,7 @@ func (db MemStorage) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, db.Cdb)
 }
 
-// handler counter
+// Обработчик для записи одной метрики
 func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	metrictype := chi.URLParam(r, "metrictype")
 	metricname := chi.URLParam(r, "metricname")
@@ -115,10 +112,9 @@ func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Принята метрика: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, gaugemetricvalue)
 		fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, db.Gdb[metricname])
 	}
-
 }
 
-// handler get metric
+// Обработчик для получения одной метрики
 func (db MemStorage) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
 	metrictype := chi.URLParam(r, "metrictype")
 	metricname := chi.URLParam(r, "metricname")
