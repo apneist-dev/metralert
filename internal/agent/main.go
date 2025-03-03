@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -22,12 +21,20 @@ var (
 	ReportInterval int      = 10
 	PollCount      counter
 	rtm            runtime.MemStats
-	serverurl      = "http://localhost:8080"
+	// serverurl      = "http://localhost:8081"
 )
 
-type Client struct{ url string }
+type Client struct {
+	url            string
+	pollInterval   int
+	reportInterval int
+}
 
-func NewClient(url string) Client { return Client{url} }
+func NewClient(url string, pollInterval int, reportInterval int) Client {
+	return Client{url,
+		pollInterval,
+		reportInterval}
+}
 
 // определяем поля структуры MemStats, итерируемся по ним и создаём слайс url
 func CollectMetric() {
@@ -71,7 +78,12 @@ func CollectMetric() {
 }
 
 func (c Client) SendPost(endpoint string) (*http.Response, error) {
-	url := serverurl + endpoint
+	url := ""
+	if !strings.Contains(c.url, "http") {
+		url = "http://" + c.url + endpoint
+	} else {
+		url = c.url + endpoint
+	}
 	// fmt.Println(url)
 	resp, err := http.Post(url, "text/plain", http.NoBody)
 	if err != nil {
@@ -84,9 +96,9 @@ func (c Client) SendPost(endpoint string) (*http.Response, error) {
 }
 
 func (c Client) SendAllMetrics() error {
-	if !strings.Contains(c.url, "http") {
-		return errors.New("no http in url")
-	}
+	// if !strings.Contains(c.url, "http") {
+	// 	return errors.New("no http in url")
+	// }
 	for {
 		mutex.Lock()
 		for _, s := range endpoints {

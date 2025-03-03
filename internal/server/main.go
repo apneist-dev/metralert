@@ -37,7 +37,7 @@ func NewServer(url string) Server {
 	r.Route("/value", func(r chi.Router) {
 		r.Get("/{metrictype}/{metricname}", db.GetMetricHandler)
 	})
-	http.ListenAndServe("localhost:8080", r)
+	http.ListenAndServe(url, r)
 	return Server{url}
 }
 

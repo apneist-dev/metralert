@@ -1,10 +1,13 @@
 package main
 
 import (
+	"flag"
 	"metralert/internal/server"
 )
 
 func main() {
-	serverurl := "localhost:8080"
-	server.NewServer(serverurl)
+	serverurl := flag.String("a", "localhost:8080", "server url")
+	flag.Parse()
+	// serverurl := "localhost:8080"
+	server.NewServer(*serverurl)
 }
