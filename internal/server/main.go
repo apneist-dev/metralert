@@ -22,7 +22,7 @@ type MemStorage struct {
 type Server struct{ url string }
 
 func NewServer(url string) Server {
-	var db = MemStorage{
+	db := MemStorage{
 		Gdb: make(map[string]gauge),
 		Cdb: make(map[string]counter),
 	}
