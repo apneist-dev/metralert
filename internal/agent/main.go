@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"reflect"
@@ -73,7 +74,7 @@ func CollectMetric() {
 		mutex.Lock()
 		endpoints = result[:]
 		mutex.Unlock()
-		fmt.Println(len(endpoints), "metrics collected")
+		log.Println(len(endpoints), "метрик собрано")
 	}
 }
 
@@ -106,7 +107,7 @@ func (c Client) SendAllMetrics() error {
 			if err != nil {
 				return err
 			}
-			fmt.Println(resp.StatusCode)
+			log.Println("Получен ответ", resp.StatusCode)
 			defer resp.Body.Close()
 		}
 		mutex.Unlock()
