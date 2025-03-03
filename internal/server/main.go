@@ -19,14 +19,13 @@ type MemStorage struct {
 	Cdb map[string]counter
 }
 
-var db = MemStorage{
-	Gdb: make(map[string]gauge),
-	Cdb: make(map[string]counter),
-}
-
 type Server struct{ url string }
 
 func NewServer(url string) Server {
+	var db = MemStorage{
+		Gdb: make(map[string]gauge),
+		Cdb: make(map[string]counter),
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
