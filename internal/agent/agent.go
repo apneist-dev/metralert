@@ -15,38 +15,52 @@ import (
 type gauge float64
 type counter int64
 
-var (
-	mutex          sync.Mutex
-	endpoints      []string = []string{}
-	PollInterval   int      = 2
-	ReportInterval int      = 10
-	PollCount      counter
-	rtm            runtime.MemStats
-)
+// var (
+// 	mutex          sync.Mutex
+// 	endpoints      []string = []string{}
+// 	PollInterval   int      = 2
+// 	ReportInterval int      = 10
+// 	PollCount      counter
+// 	rtm            runtime.MemStats
+// )
 
-type Client struct {
+type Agent struct {
 	url            string
 	pollInterval   int
 	reportInterval int
+	pollCount      counter
+	mutex          sync.Mutex
+	endpoints      []string
+	rtm            runtime.MemStats
+	client         http.Client
 }
 
 // Конструктор агента
-func NewClient(url string, pollInterval int, reportInterval int) Client {
-	return Client{url,
-		pollInterval,
-		reportInterval}
+func New(url string, poll int, report int) Agent {
+	return Agent{
+		url:            url,
+		pollInterval:   poll,
+		reportInterval: report,
+		pollCount:      counter(0),
+		mutex:          sync.Mutex{},
+		endpoints:      []string{},
+		rtm:            runtime.MemStats{},
+		client: http.Client{
+			Timeout: 3 * time.Second,
+		},
+	}
 }
 
 // Сбор метрик MemStats
-func CollectMetric() {
+func (a *Agent) CollectMetric() {
 	for {
 		var RandomValue gauge
-		runtime.ReadMemStats(&rtm)
+		runtime.ReadMemStats(&a.rtm)
 
 		result := []string{}
 
-		for i, k := range reflect.VisibleFields(reflect.TypeOf(rtm)) {
-			value := reflect.ValueOf(rtm).Field(i)
+		for i, k := range reflect.VisibleFields(reflect.TypeOf(a.rtm)) {
+			value := reflect.ValueOf(a.rtm).Field(i)
 			var endpoint string
 			switch {
 			case k.Type == reflect.TypeFor[uint64]():
@@ -65,50 +79,51 @@ func CollectMetric() {
 		endpointrandom := fmt.Sprintf("%s%s/%f", "/update/gauge/", "RandomValue", RandomValue)
 		result = append(result, endpointrandom)
 
-		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", PollCount)
+		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", a.pollCount)
 		result = append(result, endpointpollcounter)
 
-		PollCount += counter(1)
+		a.pollCount += counter(1)
 
-		time.Sleep(time.Duration(PollInterval) * time.Second)
+		time.Sleep(time.Duration(a.pollInterval) * time.Second)
 
-		mutex.Lock()
-		endpoints = result[:]
-		mutex.Unlock()
+		a.mutex.Lock()
+		a.endpoints = result[:]
+		a.mutex.Unlock()
 
-		log.Println(len(endpoints), "метрик собрано")
+		log.Println(len(a.endpoints), "метрик собрано")
 	}
 }
 
 // Отправка одного запроса Post
-func (c Client) SendPost(endpoint string) (*http.Response, error) {
+func (a *Agent) SendPost(endpoint string) (*http.Response, error) {
 	url := ""
-	if !strings.Contains(c.url, "http") {
-		url = "http://" + c.url + endpoint
+	if !strings.Contains(a.url, "http") {
+		url = "http://" + a.url + endpoint
 	} else {
-		url = c.url + endpoint
+		url = a.url + endpoint
 	}
-	resp, err := http.Post(url, "text/plain", http.NoBody)
+	resp, err := a.client.Post(url, "text/plain", http.NoBody)
 	if err != nil {
 		return resp, err
 	}
-	defer resp.Body.Close()
 	return resp, nil
 }
 
 // Отправка всех метрик
-func (c Client) SendAllMetrics() error {
+func (a *Agent) SendAllMetrics() error {
 	for {
-		mutex.Lock()
-		for _, s := range endpoints {
-			resp, err := c.SendPost(s)
+		a.mutex.Lock()
+		endpointsCopy := a.endpoints[:]
+		a.mutex.Unlock()
+		for _, s := range endpointsCopy {
+			resp, err := a.SendPost(s)
 			if err != nil {
+				log.Printf("При отправке метрик произошла ошибка: %v", err)
 				return err
 			}
 			log.Println("Получен ответ", resp.StatusCode)
-			defer resp.Body.Close()
+			resp.Body.Close()
 		}
-		mutex.Unlock()
-		time.Sleep(time.Duration(ReportInterval) * time.Second)
+		time.Sleep(time.Duration(a.reportInterval) * time.Second)
 	}
 }

@@ -10,11 +10,12 @@ import (
 type Config struct {
 	ServerAddress  string `env:"ADDRESS"`
 	ReportInterval int    `env:"REPORT_INTERVAL"`
-	PollInterval   int    `env:"pollInterval"`
+	PollInterval   int    `env:"POLL_INTERVAL"`
 }
 
 func (cfg *Config) GetConfig() {
-	err := env.Parse(&cfg)
+	err := env.Parse(cfg)
+
 	if err != nil {
 		log.Println("Переменная окружения ADDRESS не определена")
 	}
@@ -27,7 +28,7 @@ func (cfg *Config) GetConfig() {
 	}
 
 	if cfg.PollInterval == 0 {
-		flag.IntVar(&cfg.PollInterval, "p", 10, "pollInterval")
+		flag.IntVar(&cfg.PollInterval, "p", 2, "pollInterval")
 	}
 
 	flag.Parse()
