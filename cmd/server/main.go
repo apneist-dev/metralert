@@ -1,35 +1,19 @@
 package main
 
 import (
-	"flag"
-	"fmt"
 	"log"
 	"metralert/internal/server"
+	"metralert/internal/storage"
 
-	"github.com/caarlos0/env/v6"
+	serverconfig "metralert/config/server"
 )
 
 func main() {
-	type Config struct {
-		ServerAddress string `env:"ADDRESS"`
-	}
-	var (
-		cfg       Config
-		serverurl *string
-	)
+	cfg := serverconfig.Config{}
+	cfg.GetConfig()
 
-	err := env.Parse(&cfg)
-	if err != nil {
-		fmt.Println("Переменная окружения ADDRESS не определена")
-	}
-
-	if cfg.ServerAddress == "" {
-		serverurl = flag.String("a", "localhost:8080", "server url")
-		flag.Parse()
-	} else {
-		serverurl = &cfg.ServerAddress
-	}
-
-	log.Printf("Запущен сервер с адресом %s", *serverurl)
-	server.NewServer(*serverurl)
+	storage := storage.New()
+	server := server.New(cfg.ServerAddress, &storage)
+	log.Printf("Запущен сервер с адресом %s", cfg.ServerAddress)
+	server.Start()
 }

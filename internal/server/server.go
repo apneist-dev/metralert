@@ -3,52 +3,42 @@ package server
 import (
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
+
+	. "metralert/internal/metrics"
+	"metralert/internal/storage"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-type gauge float64
-type counter int64
-
-type MemStorage struct {
-	Gdb map[string]gauge
-	Cdb map[string]counter
+type Server struct {
+	url     string
+	storage *storage.MemStorage
 }
 
-type Server struct{ url string }
-
-func NewServer(url string) Server {
-	db := MemStorage{
-		Gdb: make(map[string]gauge),
-		Cdb: make(map[string]counter),
+func New(url string, repo *storage.MemStorage) Server {
+	return Server{
+		url:     url,
+		storage: repo,
 	}
+}
 
+func (server *Server) Start() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Route("/update", func(r chi.Router) {
-		r.Post("/{metrictype}/{metricname}/{metricvalue}", db.UpdateHandler)
+		r.Post("/{metrictype}/{metricname}/{metricvalue}", server.UpdateHandler)
 	})
-	r.Get("/", db.GetMainHandler)
+	r.Get("/", server.GetMainHandler)
 	r.Post("/", PostMainHandler)
 	r.Route("/value", func(r chi.Router) {
-		r.Get("/{metrictype}/{metricname}", db.GetMetricHandler)
+		r.Get("/{metrictype}/{metricname}", server.GetMetricHandler)
 	})
-	http.ListenAndServe(url, r)
-	return Server{url}
-}
-
-// TODO interface
-func (db MemStorage) SaveGaugeMetric(metricname string, metricvalue gauge) {
-	db.Gdb[metricname] = metricvalue
-}
-
-// TODO interface
-func (db MemStorage) SaveCounterMetric(metricname string, metricvalue counter) {
-	db.Cdb[metricname] += metricvalue
+	http.ListenAndServe(server.url, r)
 }
 
 // Обработчик для Post "/"
@@ -57,28 +47,19 @@ func PostMainHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Обработчик для вывод всех метрик
-func (db MemStorage) GetMainHandler(w http.ResponseWriter, r *http.Request) {
-	// Output := struct {
-	// 	Header     string
-	// 	Gaugemap   map[string]gauge
-	// 	Countermap map[string]counter
-	// }{
-	// 	Header:     "Метрики MemStats",
-	// 	Gaugemap:   db.Gdb,
-	// 	Countermap: db.Cdb,
-	// }
+func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFiles("internal/server/templates/mainpage.html")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	tmpl.Execute(w, db.Gdb)
-	tmpl.Execute(w, db.Cdb)
+	tmpl.Execute(w, server.storage.Gdb)
+	tmpl.Execute(w, server.storage.Cdb)
 }
 
 // Обработчик для записи одной метрики
-func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	metrictype := chi.URLParam(r, "metrictype")
 	metricname := chi.URLParam(r, "metricname")
 	metricvalue := chi.URLParam(r, "metricvalue")
@@ -88,45 +69,57 @@ func (db MemStorage) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if metrictype == "counter" {
+	switch metrictype {
+	case "counter":
 		value, err := strconv.Atoi(metricvalue)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-		var countermetricvalue = counter(value)
-		db.SaveCounterMetric(metricname, countermetricvalue)
+		var countermetricvalue = Counter(value)
+		server.storage.UpdateCounter(metricname, countermetricvalue)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, countermetricvalue)
-		fmt.Fprintf(w, "Значение метрики в DB: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, db.Cdb[metricname])
-	} else if metrictype == "gauge" {
+		metricvalue, ok := server.storage.ReadCounter(metricname)
+		if !ok {
+			log.Printf("Не найдена метрика %s в хранилище", metricname)
+		}
+		fmt.Fprintf(w, "Значение метрики в DB: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, metricvalue)
+	case "gauge":
 		value, err := strconv.ParseFloat(metricvalue, 64)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
-		gaugemetricvalue := gauge(value)
-		db.SaveGaugeMetric(metricname, gaugemetricvalue)
+		gaugemetricvalue := Gauge(value)
+		server.storage.UpdateGauge(metricname, gaugemetricvalue)
+		w.WriteHeader(http.StatusOK)
+		metricvalue, ok := server.storage.ReadGauge(metricname)
+		if !ok {
+			log.Printf("Не найдена метрика %s в хранилище", metricname)
+		}
 		fmt.Fprintf(w, "Принята метрика: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, gaugemetricvalue)
-		fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, db.Gdb[metricname])
+		fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, metricvalue)
+	default:
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 	}
 }
 
 // Обработчик для получения одной метрики
-func (db MemStorage) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
+func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
 	metrictype := chi.URLParam(r, "metrictype")
 	metricname := chi.URLParam(r, "metricname")
 	switch metrictype {
 	case "counter":
-		metricvalue, ok := db.Cdb[metricname]
+		metricvalue, ok := server.storage.ReadCounter(metricname)
 		if !ok {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 		fmt.Fprint(w, metricvalue)
 	case "gauge":
-		metricvalue, ok := db.Gdb[metricname]
+		metricvalue, ok := server.storage.ReadGauge(metricname)
 		if !ok {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
