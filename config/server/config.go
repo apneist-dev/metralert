@@ -12,7 +12,7 @@ type Config struct {
 }
 
 func (cfg *Config) GetConfig() {
-	err := env.Parse(&cfg)
+	err := env.Parse(cfg)
 	if err != nil {
 		fmt.Println("Переменная окружения ADDRESS не определена")
 	}
