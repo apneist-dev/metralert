@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
-	. "metralert/internal/metrics"
+	"metralert/internal/metrics"
 	"net/http"
 	"reflect"
 	"runtime"
@@ -20,7 +20,7 @@ type Agent struct {
 	url            string
 	pollInterval   int
 	reportInterval int
-	pollCount      Counter
+	pollCount      metrics.Counter
 	mutex          sync.Mutex
 	endpoints      []string
 	rtm            runtime.MemStats
@@ -33,7 +33,7 @@ func New(url string, poll int, report int) Agent {
 		url:            url,
 		pollInterval:   poll,
 		reportInterval: report,
-		pollCount:      Counter(0),
+		pollCount:      metrics.Counter(0),
 		mutex:          sync.Mutex{},
 		endpoints:      []string{},
 		rtm:            runtime.MemStats{},
@@ -46,7 +46,7 @@ func New(url string, poll int, report int) Agent {
 // Сбор метрик MemStats
 func (a *Agent) CollectMetric() {
 	for {
-		var RandomValue Gauge
+		var RandomValue metrics.Gauge
 		runtime.ReadMemStats(&a.rtm)
 
 		result := []string{}
@@ -67,14 +67,14 @@ func (a *Agent) CollectMetric() {
 			}
 		}
 
-		RandomValue = Gauge(rand.Float64())
+		RandomValue = metrics.Gauge(rand.Float64())
 		endpointrandom := fmt.Sprintf("%s%s/%f", "/update/gauge/", "RandomValue", RandomValue)
 		result = append(result, endpointrandom)
 
 		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", a.pollCount)
 		result = append(result, endpointpollcounter)
 
-		a.pollCount += Counter(1)
+		a.pollCount += metrics.Counter(1)
 
 		time.Sleep(time.Duration(a.pollInterval) * time.Second)
 

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strconv"
 
-	. "metralert/internal/metrics"
+	"metralert/internal/metrics"
 	"metralert/internal/storage"
 
 	"github.com/go-chi/chi/v5"
@@ -105,7 +105,7 @@ func (server *Server) SaveCounterMetric(w http.ResponseWriter, metricname string
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	var counterMetricValue = Counter(value)
+	var counterMetricValue = metrics.Counter(value)
 	server.storage.UpdateCounter(metricname, counterMetricValue)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, counterMetricValue)
@@ -124,7 +124,7 @@ func (server *Server) SaveGaugeMetric(w http.ResponseWriter, metricname string, 
 		return
 	}
 
-	gaugemetricvalue := Gauge(value)
+	gaugemetricvalue := metrics.Gauge(value)
 	server.storage.UpdateGauge(metricname, gaugemetricvalue)
 	w.WriteHeader(http.StatusOK)
 	storageMetricValue, ok := server.storage.ReadGauge(metricname)

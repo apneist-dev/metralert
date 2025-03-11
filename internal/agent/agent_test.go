@@ -201,6 +201,8 @@ func TestAgent_SendPost(t *testing.T) {
 				t.Errorf("Agent.SendPost() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			defer got.Body.Close()
+
 			if !reflect.DeepEqual(got.StatusCode, tt.want.code) {
 				t.Errorf("Agent.SendPost() = %v, want %v", got.StatusCode, tt.want.code)
 			}

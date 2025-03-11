@@ -16,9 +16,9 @@ func main() {
 		ReportInterval: %d`,
 		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval)
 
-	metrics_agent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval)
-	go metrics_agent.CollectMetric()
-	go metrics_agent.SendAllMetrics()
+	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval)
+	go metricsAgent.CollectMetric()
+	go metricsAgent.SendAllMetrics()
 
 	select {}
 }

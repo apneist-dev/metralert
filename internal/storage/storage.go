@@ -1,35 +1,35 @@
 package storage
 
 import (
-	. "metralert/internal/metrics"
+	"metralert/internal/metrics"
 )
 
 type MemStorage struct {
-	Gdb map[string]Gauge
-	Cdb map[string]Counter
+	Gdb map[string]metrics.Gauge
+	Cdb map[string]metrics.Counter
 }
 
 func New() MemStorage {
 	return MemStorage{
-		Gdb: make(map[string]Gauge),
-		Cdb: make(map[string]Counter),
+		Gdb: make(map[string]metrics.Gauge),
+		Cdb: make(map[string]metrics.Counter),
 	}
 }
 
-func (m *MemStorage) UpdateGauge(metricName string, metricValue Gauge) {
-	m.Gdb[metricName] = Gauge(metricValue)
+func (m *MemStorage) UpdateGauge(metricName string, metricValue metrics.Gauge) {
+	m.Gdb[metricName] = metrics.Gauge(metricValue)
 }
 
-func (m *MemStorage) UpdateCounter(metricName string, metricValue Counter) {
-	m.Cdb[metricName] += Counter(metricValue)
+func (m *MemStorage) UpdateCounter(metricName string, metricValue metrics.Counter) {
+	m.Cdb[metricName] += metrics.Counter(metricValue)
 }
 
-func (m *MemStorage) ReadGauge(metricName string) (Gauge, bool) {
+func (m *MemStorage) ReadGauge(metricName string) (metrics.Gauge, bool) {
 	metricValue, ok := m.Gdb[metricName]
 	return metricValue, ok
 }
 
-func (m *MemStorage) ReadCounter(metricName string) (Counter, bool) {
+func (m *MemStorage) ReadCounter(metricName string) (metrics.Counter, bool) {
 	metricValue, ok := m.Cdb[metricName]
 	return metricValue, ok
 }
