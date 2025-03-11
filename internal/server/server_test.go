@@ -257,8 +257,8 @@ func TestServer_SaveGaugeMetric(t *testing.T) {
 				metricvalue: "123.23232332",
 			},
 			want: storage.MemStorage{
-				Gdb: map[string]Gauge{"NewShinyGaugeMetric": 123.23232332},
-				Cdb: map[string]Counter{},
+				Gaugedb:   map[string]Gauge{"NewShinyGaugeMetric": 123.23232332},
+				Counterdb: map[string]Counter{},
 			},
 		},
 	}

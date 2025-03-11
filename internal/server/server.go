@@ -9,18 +9,26 @@ import (
 	"strconv"
 
 	"metralert/internal/metrics"
-	"metralert/internal/storage"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-type Server struct {
-	url     string
-	storage *storage.MemStorage
+type StorageInterface interface {
+	UpdateGauge(string, metrics.Gauge)
+	UpdateCounter(string, metrics.Counter)
+	ReadGauge(string) (metrics.Gauge, bool)
+	ReadCounter(string) (metrics.Counter, bool)
+	ReadAllGauge() map[string]metrics.Gauge
+	ReadAllCounter() map[string]metrics.Counter
 }
 
-func New(url string, repo *storage.MemStorage) Server {
+type Server struct {
+	url     string
+	storage StorageInterface
+}
+
+func New(url string, repo StorageInterface) Server {
 	return Server{
 		url:     url,
 		storage: repo,
@@ -48,8 +56,8 @@ func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl.Execute(w, server.storage.Gdb)
-	tmpl.Execute(w, server.storage.Cdb)
+	tmpl.Execute(w, server.storage.ReadAllGauge())
+	tmpl.Execute(w, server.storage.ReadAllCounter())
 }
 
 // Обработчик для записи одной метрики в хранилище

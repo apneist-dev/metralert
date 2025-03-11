@@ -111,7 +111,7 @@ func (a *Agent) SendAllMetrics() error {
 			resp, err := a.SendPost(s)
 			if err != nil {
 				log.Printf("При отправке метрик произошла ошибка: %v", err)
-				return err
+				continue
 			}
 			log.Println("Получен ответ", resp.StatusCode)
 			resp.Body.Close()
