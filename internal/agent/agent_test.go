@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 
 	_ "github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -196,8 +197,10 @@ func TestAgent_SendPost(t *testing.T) {
 			logger, _ := zap.NewDevelopment()
 			sugar := logger.Sugar()
 			storage := storage.New()
+
 			server := server.New(tt.fields.url, &storage, sugar)
 			go server.Start()
+			time.Sleep(time.Second * 3)
 
 			got, err := a.SendPost(tt.args.endpoint)
 			if (err != nil) != tt.wantErr {
