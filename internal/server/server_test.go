@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestServer_GetMainHandler(t *testing.T) {
@@ -205,8 +206,10 @@ func TestServer_UpdateHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			logger, _ := zap.NewDevelopment()
+			sugar := logger.Sugar()
 			storage := storage.New()
-			server := New(tt.fields.url, &storage)
+			server := New(tt.fields.url, &storage, sugar)
 			log.Printf("Запущен сервер с адресом %s", tt.fields.url)
 			// server.Start()
 
@@ -264,8 +267,10 @@ func TestServer_SaveGaugeMetric(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			logger, _ := zap.NewDevelopment()
+			sugar := logger.Sugar()
 			storage := storage.New()
-			server := New(tt.fields.url, &storage)
+			server := New(tt.fields.url, &storage, sugar)
 			// server.Start()
 
 			// создаём новый Recorder

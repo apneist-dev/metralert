@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	_ "github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 // func TestClient_SendPost(t *testing.T) {
@@ -192,8 +193,10 @@ func TestAgent_SendPost(t *testing.T) {
 				rtm:            tt.fields.rtm,
 				client:         tt.fields.client,
 			}
+			logger, _ := zap.NewDevelopment()
+			sugar := logger.Sugar()
 			storage := storage.New()
-			server := server.New(tt.fields.url, &storage)
+			server := server.New(tt.fields.url, &storage, sugar)
 			go server.Start()
 
 			got, err := a.SendPost(tt.args.endpoint)
