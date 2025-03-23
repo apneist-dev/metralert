@@ -27,6 +27,9 @@ type Agent struct {
 
 // Конструктор агента
 func New(url string, poll int, report int) Agent {
+	if !strings.Contains(url, "http") {
+		url = "http://" + url
+	}
 	return Agent{
 		url:              url,
 		pollInterval:     poll,
@@ -104,12 +107,7 @@ func (a *Agent) CollectMetric() {
 
 // Отправка одного запроса Post
 func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
-	url := ""
-	if !strings.Contains(a.url, "http") {
-		url = "http://" + a.url + "/update/"
-	} else {
-		url = a.url + "/update/"
-	}
+	url := a.url + "/update/"
 	jsonData, err := json.Marshal(metric)
 	if err != nil {
 		log.Println("Unable to Marshal metric")
@@ -129,11 +127,11 @@ func (a *Agent) SendAllMetrics() error {
 		memoryStatisticsCopy := a.memoryStatistics[:]
 		a.mutex.Unlock()
 		for {
-			resp, err := a.SendPost(metrics.Metrics{})
-			resp.Body.Close()
+			resp, err := a.client.Get(a.url)
 			if err != nil {
 				continue
 			}
+			resp.Body.Close()
 			break
 		}
 		for _, s := range memoryStatisticsCopy {
