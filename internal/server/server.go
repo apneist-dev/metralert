@@ -166,6 +166,8 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, *resultMetric.Delta)
 	case "gauge":
 		metricvalueFloat64, err := strconv.ParseFloat(metricvalue, 64)
 		if err != nil {
@@ -178,13 +180,12 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %f)\n", metricname, *resultMetric.Value)
 	default:
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %f)\n", metricname, *resultMetric.Value)
 }
 
 func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
