@@ -132,8 +132,6 @@ func (a *Agent) SendAllMetrics() error {
 			resp, err := a.SendPost(metrics.Metrics{})
 			resp.Body.Close()
 			if err != nil {
-				log.Printf("Ждём, пока поднимется сервер. Ошибка: %v", err)
-				time.Sleep(time.Second * 2)
 				continue
 			}
 			break
