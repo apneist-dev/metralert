@@ -50,18 +50,18 @@ func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
 			Value: metric.Value,
 		}
 	case "counter":
-		var newValue float64
+		var newDelta int64
 		_, ok := m.db[metric.ID]
 		if !ok {
-			newValue = (float64)(*metric.Delta)
+			newDelta = (int64)(*metric.Delta)
 		} else {
-			newValue = *m.db[metric.ID].Value + (float64)(*metric.Delta)
+			newDelta = *m.db[metric.ID].Delta + (int64)(*metric.Delta)
 		}
 		m.db[metric.ID] = metrics.Metrics{
 			ID:    metric.ID,
 			MType: metric.MType,
-			Delta: metric.Delta,
-			Value: &newValue,
+			Delta: &newDelta,
+			// Value: &newValue,
 		}
 	default:
 		err = errors.New("invalid Mtype")
@@ -70,12 +70,13 @@ func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
 }
 
 func (m *MemStorage) Read(metric metrics.Metrics) (metrics.Metrics, bool) {
-	receivedMetric, ok := m.db[metric.ID]
-	result := metrics.Metrics{
-		ID:    receivedMetric.ID,
-		MType: receivedMetric.MType,
-		Value: receivedMetric.Value,
-	}
+	result, ok := m.db[metric.ID]
+	// receivedMetric, ok := m.db[metric.ID]
+	// result := metrics.Metrics{
+	// 	ID:    receivedMetric.ID,
+	// 	MType: receivedMetric.MType,
+	// 	Value: receivedMetric.Value,
+	// }
 	return result, ok
 }
 
