@@ -3,8 +3,11 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
+	"slices"
+	"strconv"
 	"time"
 
 	"metralert/internal/metrics"
@@ -89,9 +92,15 @@ func (server *Server) Start() {
 		"url", server.url)
 
 	r.Use(server.loggingMiddleware)
-	r.Post("/update/", server.UpdateMetricJSONHandler)
+	r.Route("/update", func(r chi.Router) {
+		r.Post("/{metrictype}/{metricname}/{metricvalue}", server.UpdateHandler)
+		r.Post("/", server.UpdateMetricJSONHandler)
+	})
 	r.Get("/", server.GetMainHandler)
-	r.Post("/value/", server.ReadMetricJSONHandler)
+	r.Route("/value", func(r chi.Router) {
+		r.Get("/{metrictype}/{metricname}", server.GetMetricHandler)
+		r.Post("/", server.ReadMetricJSONHandler)
+	})
 	if err := http.ListenAndServe(server.url, r); err != nil {
 		server.logger.Fatalw(err.Error(), "event", "start server")
 	}
@@ -106,6 +115,76 @@ func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tmpl.Execute(w, server.storage.ReadAll())
+}
+
+func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
+	metrictype := chi.URLParam(r, "metrictype")
+	metricname := chi.URLParam(r, "metricname")
+
+	metric := metrics.Metrics{
+		ID:    metricname,
+		MType: metrictype,
+	}
+
+	storageMetric, ok := server.storage.Read(metric)
+	if !ok {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+	fmt.Fprint(w, storageMetric.Value)
+}
+
+// Обработчик для записи одной метрики в хранилище
+func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+	metrictype := chi.URLParam(r, "metrictype")
+	metricname := chi.URLParam(r, "metricname")
+	metricvalue := chi.URLParam(r, "metricvalue")
+
+	metric := metrics.Metrics{
+		ID:    metricname,
+		MType: metrictype,
+	}
+
+	resultMetric := metrics.Metrics{}
+
+	types := []string{"gauge", "counter"}
+	if !slices.Contains(types, metrictype) {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	switch metrictype {
+	case "counter":
+		metricvalueInt64, err := strconv.ParseInt(metricvalue, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		metric.Delta = &metricvalueInt64
+		resultMetric, err = server.storage.Update(metric)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+	case "gauge":
+		metricvalueFloat64, err := strconv.ParseFloat(metricvalue, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		metric.Value = &metricvalueFloat64
+		resultMetric, err = server.storage.Update(metric)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %f)\n", metricname, *resultMetric.Value)
 }
 
 func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
