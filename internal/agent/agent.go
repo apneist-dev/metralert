@@ -128,6 +128,15 @@ func (a *Agent) SendAllMetrics() error {
 		a.mutex.Lock()
 		memoryStatisticsCopy := a.memoryStatistics[:]
 		a.mutex.Unlock()
+		for {
+			_, err := a.SendPost(metrics.Metrics{})
+			if err != nil {
+				log.Printf("Ждём, пока поднимется сервер. Ошибка: %v", err)
+				time.Sleep(time.Second * 2)
+				continue
+			}
+			break
+		}
 		for _, s := range memoryStatisticsCopy {
 			resp, err := a.SendPost(s)
 			if err != nil {
