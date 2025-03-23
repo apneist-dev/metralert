@@ -70,7 +70,12 @@ func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
 }
 
 func (m *MemStorage) Read(metric metrics.Metrics) (metrics.Metrics, bool) {
-	result, ok := m.db[metric.ID]
+	receivedMetric, ok := m.db[metric.ID]
+	result := metrics.Metrics{
+		ID:    receivedMetric.ID,
+		MType: receivedMetric.MType,
+		Value: receivedMetric.Value,
+	}
 	return result, ok
 }
 
