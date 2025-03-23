@@ -131,7 +131,12 @@ func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
-	fmt.Fprint(w, *storageMetric.Value)
+	if storageMetric.Value != nil {
+		fmt.Fprint(w, *storageMetric.Value)
+	}
+	if storageMetric.Delta != nil {
+		fmt.Fprint(w, *storageMetric.Delta)
+	}
 }
 
 // Обработчик для записи одной метрики в хранилище
