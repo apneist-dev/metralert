@@ -1,7 +1,8 @@
 package agent
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/json"
 	"log"
 	"math/rand/v2"
 	"metralert/internal/metrics"
@@ -13,30 +14,27 @@ import (
 	"time"
 )
 
-// type gauge float64
-// type counter int64
-
 type Agent struct {
-	url            string
-	pollInterval   int
-	reportInterval int
-	pollCount      metrics.Counter
-	mutex          sync.Mutex
-	endpoints      []string
-	rtm            runtime.MemStats
-	client         http.Client
+	url              string
+	pollInterval     int
+	reportInterval   int
+	pollCount        metrics.Counter
+	mutex            sync.Mutex
+	memoryStatistics []metrics.Metrics
+	rtm              runtime.MemStats
+	client           http.Client
 }
 
 // Конструктор агента
 func New(url string, poll int, report int) Agent {
 	return Agent{
-		url:            url,
-		pollInterval:   poll,
-		reportInterval: report,
-		pollCount:      metrics.Counter(0),
-		mutex:          sync.Mutex{},
-		endpoints:      []string{},
-		rtm:            runtime.MemStats{},
+		url:              url,
+		pollInterval:     poll,
+		reportInterval:   report,
+		pollCount:        metrics.Counter(0),
+		mutex:            sync.Mutex{},
+		memoryStatistics: []metrics.Metrics{},
+		rtm:              runtime.MemStats{},
 		client: http.Client{
 			Timeout: 3 * time.Second,
 		},
@@ -49,52 +47,75 @@ func (a *Agent) CollectMetric() {
 		var RandomValue metrics.Gauge
 		runtime.ReadMemStats(&a.rtm)
 
-		result := []string{}
+		// result := []string{}
+		result := []metrics.Metrics{}
 
 		for i, k := range reflect.VisibleFields(reflect.TypeOf(a.rtm)) {
 			value := reflect.ValueOf(a.rtm).Field(i)
-			var endpoint string
 			switch {
 			case k.Type == reflect.TypeFor[uint64]():
-				endpoint = fmt.Sprintf("%s%s/%d", "/update/gauge/", k.Name, value.Interface().(uint64))
+				v := float64(value.Interface().(uint64))
+				result = append(result, metrics.Metrics{
+					ID:    k.Name,
+					MType: "gauge",
+					Value: &v,
+				})
 			case k.Type == reflect.TypeFor[uint32]():
-				endpoint = fmt.Sprintf("%s%s/%d", "/update/gauge/", k.Name, value.Interface().(uint32))
+				v := float64(value.Interface().(uint32))
+				result = append(result, metrics.Metrics{
+					ID:    k.Name,
+					MType: "gauge",
+					Value: &v,
+				})
 			case k.Type == reflect.TypeFor[float64]():
-				endpoint = fmt.Sprintf("%s%s/%f", "/update/gauge/", k.Name, value.Interface().(float64))
-			}
-			if endpoint != "" {
-				result = append(result, endpoint)
+				v := float64(value.Interface().(float64))
+				result = append(result, metrics.Metrics{
+					ID:    k.Name,
+					MType: "gauge",
+					Value: &v,
+				})
 			}
 		}
 
 		RandomValue = metrics.Gauge(rand.Float64())
-		endpointrandom := fmt.Sprintf("%s%s/%f", "/update/gauge/", "RandomValue", RandomValue)
-		result = append(result, endpointrandom)
+		result = append(result, metrics.Metrics{
+			ID:    "PollCount",
+			MType: "counter",
+			Delta: (*int64)(&a.pollCount),
+		})
 
-		endpointpollcounter := fmt.Sprintf("%s%s/%d", "/update/counter/", "PollCount", a.pollCount)
-		result = append(result, endpointpollcounter)
+		result = append(result, metrics.Metrics{
+			ID:    "RandomValue",
+			MType: "gauge",
+			Value: (*float64)(&RandomValue),
+		})
 
 		a.pollCount += metrics.Counter(1)
 
 		time.Sleep(time.Duration(a.pollInterval) * time.Second)
 
 		a.mutex.Lock()
-		a.endpoints = result[:]
+		a.memoryStatistics = result[:]
 		a.mutex.Unlock()
 
-		log.Println(len(a.endpoints), "метрик собрано")
+		log.Println(len(a.memoryStatistics), "метрик собрано")
 	}
 }
 
 // Отправка одного запроса Post
-func (a *Agent) SendPost(endpoint string) (*http.Response, error) {
+func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 	url := ""
 	if !strings.Contains(a.url, "http") {
-		url = "http://" + a.url + endpoint
+		url = "http://" + a.url + "/update/"
 	} else {
-		url = a.url + endpoint
+		url = a.url + "/update/"
 	}
-	resp, err := a.client.Post(url, "text/plain", http.NoBody)
+	jsonData, err := json.Marshal(metric)
+	if err != nil {
+		log.Println("Unable to Marshal metric")
+		return nil, err
+	}
+	resp, err := a.client.Post(url, "text/plain", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return resp, err
 	}
@@ -105,9 +126,9 @@ func (a *Agent) SendPost(endpoint string) (*http.Response, error) {
 func (a *Agent) SendAllMetrics() error {
 	for {
 		a.mutex.Lock()
-		endpointsCopy := a.endpoints[:]
+		memoryStatisticsCopy := a.memoryStatistics[:]
 		a.mutex.Unlock()
-		for _, s := range endpointsCopy {
+		for _, s := range memoryStatisticsCopy {
 			resp, err := a.SendPost(s)
 			if err != nil {
 				log.Printf("При отправке метрик произошла ошибка: %v", err)

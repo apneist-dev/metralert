@@ -1,12 +1,10 @@
 package server
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/json"
 	"html/template"
-	"log"
 	"net/http"
-	"slices"
-	"strconv"
 	"time"
 
 	"metralert/internal/metrics"
@@ -16,12 +14,9 @@ import (
 )
 
 type StorageInterface interface {
-	UpdateGauge(string, metrics.Gauge)
-	UpdateCounter(string, metrics.Counter)
-	ReadGauge(string) (metrics.Gauge, bool)
-	ReadCounter(string) (metrics.Counter, bool)
-	ReadAllGauge() map[string]metrics.Gauge
-	ReadAllCounter() map[string]metrics.Counter
+	Update(metric metrics.Metrics) (metrics.Metrics, error)
+	Read(metric metrics.Metrics) (metrics.Metrics, bool)
+	ReadAll() map[string]string
 }
 
 type Server struct {
@@ -80,7 +75,7 @@ func (server *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"Method", r.Method,
 			"TimeSpent", time.Since(start),
 			"ResponseSize", response.size,
-			"ResponseStaus", response.status,
+			"ResponseStatus", response.status,
 		)
 	}
 	return http.HandlerFunc(logFn)
@@ -94,13 +89,9 @@ func (server *Server) Start() {
 		"url", server.url)
 
 	r.Use(server.loggingMiddleware)
-	r.Route("/update", func(r chi.Router) {
-		r.Post("/{metrictype}/{metricname}/{metricvalue}", server.UpdateHandler)
-	})
+	r.Post("/update/", server.UpdateMetricJSONHandler)
 	r.Get("/", server.GetMainHandler)
-	r.Route("/value", func(r chi.Router) {
-		r.Get("/{metrictype}/{metricname}", server.GetMetricHandler)
-	})
+	r.Post("/value/", server.ReadMetricJSONHandler)
 	if err := http.ListenAndServe(server.url, r); err != nil {
 		server.logger.Fatalw(err.Error(), "event", "start server")
 	}
@@ -114,89 +105,69 @@ func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl.Execute(w, server.storage.ReadAllGauge())
-	tmpl.Execute(w, server.storage.ReadAllCounter())
+	tmpl.Execute(w, server.storage.ReadAll())
 }
 
-// Обработчик для записи одной метрики в хранилище
-func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
-	metrictype := chi.URLParam(r, "metrictype")
-	metricname := chi.URLParam(r, "metricname")
-	metricvalue := chi.URLParam(r, "metricvalue")
-	types := []string{"gauge", "counter"}
-	if !slices.Contains(types, metrictype) {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metric metrics.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	switch metrictype {
-	case "counter":
-		server.SaveCounterMetric(w, metricname, metricvalue)
-	case "gauge":
-		server.SaveGaugeMetric(w, metricname, metricvalue)
-	default:
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	if err = json.Unmarshal(buf.Bytes(), &metric); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-}
 
-// Обработчик для получения значения одной метрики
-func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
-	metrictype := chi.URLParam(r, "metrictype")
-	metricname := chi.URLParam(r, "metricname")
-	switch metrictype {
-	case "counter":
-		metricvalue, ok := server.storage.ReadCounter(metricname)
-		if !ok {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-		fmt.Fprint(w, metricvalue)
-	case "gauge":
-		metricvalue, ok := server.storage.ReadGauge(metricname)
-		if !ok {
-			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			return
-		}
-		fmt.Fprint(w, metricvalue)
-	default:
+	storageMetric, ok := server.storage.Read(metric)
+	if !ok {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
+
+	resp, err := json.Marshal(storageMetric)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
 }
 
-// Хелпер для сохранение Counter метрики в хранилище
-func (server *Server) SaveCounterMetric(w http.ResponseWriter, metricname string, metricvalue string) {
-	value, err := strconv.Atoi(metricvalue)
+func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metric metrics.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err = json.Unmarshal(buf.Bytes(), &metric); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resultMetric, err := server.storage.Update(metric)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	var counterMetricValue = metrics.Counter(value)
-	server.storage.UpdateCounter(metricname, counterMetricValue)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Принята метрика: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, counterMetricValue)
-	storageMetricValue, ok := server.storage.ReadCounter(metricname)
-	if !ok {
-		log.Printf("Не найдена метрика %s в хранилище", metricname)
-	}
-	fmt.Fprintf(w, "Значение метрики в DB: (Тип: counter, Имя: %s, Значение: %d)\n", metricname, storageMetricValue)
-}
 
-// Хелпер для сохранение Gauge метрики в хранилище
-func (server *Server) SaveGaugeMetric(w http.ResponseWriter, metricname string, metricvalue string) {
-	value, err := strconv.ParseFloat(metricvalue, 64)
+	resp, err := json.Marshal(resultMetric)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	gaugemetricvalue := metrics.Gauge(value)
-	server.storage.UpdateGauge(metricname, gaugemetricvalue)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	storageMetricValue, ok := server.storage.ReadGauge(metricname)
-	if !ok {
-		log.Printf("Не найдена метрика %s в хранилище", metricname)
-	}
-	fmt.Fprintf(w, "Принята метрика: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, gaugemetricvalue)
-	fmt.Fprintf(w, "Значение метрики в DB: (Тип: gauge, Имя: %s, Значение: %f)\n", metricname, storageMetricValue)
+	w.Write(resp)
 }
