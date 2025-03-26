@@ -113,7 +113,7 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 		log.Println("Unable to Marshal metric")
 		return nil, err
 	}
-	resp, err := a.client.Post(url, "text/plain", bytes.NewBuffer(jsonData))
+	resp, err := a.client.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return resp, err
 	}

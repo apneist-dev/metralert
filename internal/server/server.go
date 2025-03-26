@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"metralert/internal/metrics"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
 	"go.uber.org/zap"
 )
 
@@ -92,6 +95,7 @@ func (server *Server) Start() {
 		"url", server.url)
 
 	r.Use(server.loggingMiddleware)
+	r.Use(middleware.Compress(5, "application/json", "text/html"))
 	r.Route("/update", func(r chi.Router) {
 		r.Post("/{metrictype}/{metricname}/{metricvalue}", server.UpdateHandler)
 		r.Post("/", server.UpdateMetricJSONHandler)
@@ -108,12 +112,17 @@ func (server *Server) Start() {
 
 // Обработчик для вывод всех метрик в html страницу
 func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
+
 	tmpl, err := template.ParseFiles("internal/server/templates/mainpage.html")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Type", "gzip")
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
 	tmpl.Execute(w, server.storage.ReadAll())
 }
 
