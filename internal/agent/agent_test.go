@@ -78,9 +78,9 @@ func TestAgent_SendPost(t *testing.T) {
 			}
 			logger, _ := zap.NewDevelopment()
 			sugar := logger.Sugar()
-			storage := storage.New()
+			storage := storage.New("internal/storage/metrics_database.json", false, logger.Sugar())
 
-			server := server.New(tt.fields.serverurl, &storage, sugar)
+			server := server.New(tt.fields.serverurl, storage, sugar)
 			go server.Start()
 			time.Sleep(time.Second * 3)
 

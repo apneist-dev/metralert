@@ -1,19 +1,62 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"metralert/internal/metrics"
+	"os"
+	"time"
+
+	"go.uber.org/zap"
 )
 
 type MemStorage struct {
-	db map[string]metrics.Metrics
+	db              map[string]metrics.Metrics
+	fileStoragePath string
+	logger          *zap.SugaredLogger
 }
 
-func New() MemStorage {
-	return MemStorage{
-		db: make(map[string]metrics.Metrics),
+func New(fileStoragePath string, recover bool, logger *zap.SugaredLogger) *MemStorage {
+	m := MemStorage{
+		db:              make(map[string]metrics.Metrics),
+		fileStoragePath: fileStoragePath,
+		logger:          logger,
 	}
+
+	if recover {
+		jsonData, err := os.ReadFile(fileStoragePath)
+		if err != nil {
+			logger.Infow("Unable to open file, creating new", "Path", fileStoragePath)
+
+			_, err := os.Create(m.fileStoragePath)
+			if err != nil {
+				m.logger.Warnw("Unable to create file", "Path", m.fileStoragePath)
+			} else {
+				m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
+			}
+			// m = New(fileStoragePath, logger)
+		} else {
+			logger.Infow("File opened successfilly", "Path", fileStoragePath)
+
+			err = json.Unmarshal(jsonData, &m.db)
+			if err != nil {
+				logger.Warnw("Unable to Unmarshal structure")
+			}
+
+		}
+
+		if m.db == nil {
+			return &MemStorage{
+				db:              make(map[string]metrics.Metrics),
+				fileStoragePath: fileStoragePath,
+				logger:          logger,
+			}
+		} else {
+			logger.Infow("Recovered sussessfully", "DB", m.db)
+		}
+	}
+	return &m
 }
 
 func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
@@ -71,12 +114,6 @@ func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
 
 func (m *MemStorage) Read(metric metrics.Metrics) (metrics.Metrics, bool) {
 	result, ok := m.db[metric.ID]
-	// receivedMetric, ok := m.db[metric.ID]
-	// result := metrics.Metrics{
-	// 	ID:    receivedMetric.ID,
-	// 	MType: receivedMetric.MType,
-	// 	Value: receivedMetric.Value,
-	// }
 	return result, ok
 }
 
@@ -91,4 +128,37 @@ func (m *MemStorage) ReadAll() map[string]string {
 		}
 	}
 	return result
+}
+
+func (m *MemStorage) BackupService(storeInterval int, shutdown bool) {
+	SaveDatabase := func() {
+		file, err := os.Create(m.fileStoragePath)
+		if err != nil {
+			m.logger.Warnw("Unable to create file", "Path", m.fileStoragePath)
+		} else {
+			m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
+		}
+		data, err := json.Marshal(m.db)
+		if err != nil {
+			m.logger.Warnw("Unable to Unmarshal structure")
+		}
+		_, err1 := file.Write(data)
+		if err1 != nil {
+			m.logger.Warnw("Unable to write to file", "Path", m.fileStoragePath)
+		} else {
+			m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
+		}
+	}
+
+	if shutdown {
+		m.logger.Infow("Shutting down")
+		SaveDatabase()
+		time.Sleep(time.Duration(2) * time.Second)
+		return
+	}
+
+	for {
+		time.Sleep(time.Duration(storeInterval) * time.Second)
+		SaveDatabase()
+	}
 }
