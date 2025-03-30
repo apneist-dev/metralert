@@ -68,7 +68,7 @@ func TestAgent_SendPost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &Agent{
-				url:              tt.fields.agenturl,
+				BaseURL:          tt.fields.agenturl,
 				pollInterval:     tt.fields.pollInterval,
 				reportInterval:   tt.fields.reportInterval,
 				pollCount:        tt.fields.pollCount,

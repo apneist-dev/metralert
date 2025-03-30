@@ -2,20 +2,29 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"log"
 	"math/rand/v2"
 	"metralert/internal/metrics"
 	"net/http"
+	"net/url"
 	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+)
+
+const (
+	updatePath = "/update/"
 )
 
 type Agent struct {
-	url              string
+	BaseURL          string
 	pollInterval     int
 	reportInterval   int
 	pollCount        metrics.Counter
@@ -23,24 +32,34 @@ type Agent struct {
 	memoryStatistics []metrics.Metrics
 	rtm              runtime.MemStats
 	client           http.Client
+	logger           *zap.SugaredLogger
 }
 
 // Конструктор агента
-func New(url string, poll int, report int) Agent {
-	if !strings.Contains(url, "http") {
-		url = "http://" + url
+func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger) *Agent {
+	if !strings.Contains(address, "http") {
+		address = "http://" + address
 	}
-	return Agent{
-		url:              url,
-		pollInterval:     poll,
-		reportInterval:   report,
+	destinationAddress, err := url.ParseRequestURI(address)
+	if err != nil {
+		logger.Fatalw("Invalid URL:", err)
+	}
+	transport := &http.Transport{
+		DisableCompression: false,
+	}
+	return &Agent{
+		BaseURL:          destinationAddress.String(),
+		pollInterval:     pollInterval,
+		reportInterval:   reportInterval,
 		pollCount:        metrics.Counter(0),
 		mutex:            sync.Mutex{},
-		memoryStatistics: []metrics.Metrics{},
+		memoryStatistics: make([]metrics.Metrics, 40),
 		rtm:              runtime.MemStats{},
 		client: http.Client{
-			Timeout: 3 * time.Second,
+			Timeout:   3 * time.Second,
+			Transport: transport,
 		},
+		logger: logger,
 	}
 }
 
@@ -81,6 +100,7 @@ func (a *Agent) CollectMetric() {
 		}
 
 		RandomValue = metrics.Gauge(rand.Float64())
+
 		result = append(result, metrics.Metrics{
 			ID:    "PollCount",
 			MType: "counter",
@@ -98,25 +118,58 @@ func (a *Agent) CollectMetric() {
 		time.Sleep(time.Duration(a.pollInterval) * time.Second)
 
 		a.mutex.Lock()
-		a.memoryStatistics = result[:]
+		copy(a.memoryStatistics, result)
 		a.mutex.Unlock()
 
-		log.Println(len(a.memoryStatistics), "метрик собрано")
+		a.logger.Infow("Metrics collected", "number", len(a.memoryStatistics))
+
 	}
+}
+
+func gzipCompress(body []byte) (io.Reader, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	_, err := gz.Write(body)
+	if err != nil {
+		return nil, err
+	}
+
+	err1 := gz.Close()
+	if err1 != nil {
+		return nil, err1
+	}
+	return &buf, nil
 }
 
 // Отправка одного запроса Post
 func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
-	url := a.url + "/update/"
+	endpoint := a.BaseURL + updatePath
 	jsonData, err := json.Marshal(metric)
 	if err != nil {
 		log.Println("Unable to Marshal metric")
 		return nil, err
 	}
-	resp, err := a.client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+
+	compressedBody, err := gzipCompress(jsonData)
+	if err != nil {
+		a.logger.Fatalw("Unable to compress body")
+	}
+
+	req, err := http.NewRequest("POST", endpoint, compressedBody)
+	if err != nil {
+		a.logger.Fatalw("Unable to form request")
+	}
+
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
 	if err != nil {
 		return resp, err
 	}
+	defer resp.Body.Close()
+
 	return resp, nil
 }
 
@@ -124,23 +177,29 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 func (a *Agent) SendAllMetrics() error {
 	for {
 		a.mutex.Lock()
-		memoryStatisticsCopy := a.memoryStatistics[:]
+		memoryStatisticsCopy := make([]metrics.Metrics, len(a.memoryStatistics))
+		copy(memoryStatisticsCopy, a.memoryStatistics)
 		a.mutex.Unlock()
+		a.logger.Infow("Waiting for server")
 		for {
-			resp, err := a.client.Get(a.url)
+			resp, err := a.client.Get(a.BaseURL)
 			if err != nil {
 				continue
 			}
 			resp.Body.Close()
 			break
 		}
+		a.logger.Infow("Server is reachable")
 		for _, s := range memoryStatisticsCopy {
 			resp, err := a.SendPost(s)
 			if err != nil {
 				log.Printf("При отправке метрик произошла ошибка: %v", err)
 				continue
 			}
-			log.Println("Получен ответ", resp.StatusCode)
+			a.logger.Infow("Response received",
+				"status", resp.StatusCode,
+				"Content-Type", resp.Header.Get("Content-Type"),
+				"Content-Encoding", resp.Header.Get("Content-Encoding"))
 			resp.Body.Close()
 		}
 		time.Sleep(time.Duration(a.reportInterval) * time.Second)

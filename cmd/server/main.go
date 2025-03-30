@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"metralert/internal/server"
 	"metralert/internal/storage"
 	"os"
@@ -13,15 +14,15 @@ import (
 
 func main() {
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, os.Interrupt)
 
 	cfg := serverconfig.Config{}
 	cfg.GetConfig()
 
 	logger, err := zap.NewDevelopment()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer logger.Sync()
 	sugar := logger.Sugar()
@@ -32,7 +33,8 @@ func main() {
 	server := server.New(cfg.ServerAddress, storage, sugar)
 	go server.Start()
 
-	<-stop
+	<-shutdownCh
+	server.Shutdown()
 	storage.BackupService(cfg.StoreInterval, true)
 
 }

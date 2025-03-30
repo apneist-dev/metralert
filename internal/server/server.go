@@ -2,9 +2,12 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -20,22 +23,63 @@ import (
 )
 
 type StorageInterface interface {
-	Update(metric metrics.Metrics) (metrics.Metrics, error)
-	Read(metric metrics.Metrics) (metrics.Metrics, bool)
-	ReadAll() map[string]string
+	UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error)
+	GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool)
+	GetMetrics() map[string]string
 }
 
 type Server struct {
-	url     string
-	storage StorageInterface
-	logger  *zap.SugaredLogger
+	storage    StorageInterface
+	logger     *zap.SugaredLogger
+	HttpServer *http.Server
+	Router     *chi.Mux
 }
 
-func New(url string, repo StorageInterface, logger *zap.SugaredLogger) Server {
-	return Server{
-		url:     url,
-		storage: repo,
-		logger:  logger,
+func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Server {
+	s := &Server{}
+	s.Router = chi.NewRouter()
+	s.Router.Use(s.loggingMiddleware)
+
+	s.Router.Use(middleware.Compress(5, "application/json", "text/html"))
+	s.Router.Route("/update", func(router chi.Router) {
+		router.Post("/{metrictype}/{metricname}/{metricvalue}", s.UpdateHandler)
+		router.Post("/", s.UpdateMetricJSONHandler)
+	})
+	s.Router.Get("/", s.GetMainHandler)
+	s.Router.Route("/value", func(router chi.Router) {
+		router.Get("/{metrictype}/{metricname}", s.GetMetricHandler)
+		router.Post("/", s.ReadMetricJSONHandler)
+	})
+
+	s.storage = repo
+	s.logger = logger
+
+	s.HttpServer = &http.Server{
+		Addr:    address,
+		Handler: s.Router,
+	}
+
+	return s
+}
+
+func (server *Server) Start() {
+	server.logger.Infow(
+		"Starting server",
+		"url", server.HttpServer.Addr)
+
+	err := server.HttpServer.ListenAndServe()
+	if err != http.ErrServerClosed {
+		server.logger.Fatalw("Unable to start server:", err)
+	}
+}
+
+func (server *Server) Shutdown() {
+	server.logger.Infow(
+		"Shutting down server",
+		"url", server.HttpServer.Addr)
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := server.HttpServer.Shutdown(ctx); err != nil {
+		server.logger.Fatalw(err.Error(), "event", "shutdown server")
 	}
 }
 
@@ -87,29 +131,6 @@ func (server *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(logFn)
 }
 
-func (server *Server) Start() {
-	r := chi.NewRouter()
-
-	server.logger.Infow(
-		"Starting server",
-		"url", server.url)
-
-	r.Use(server.loggingMiddleware)
-	r.Use(middleware.Compress(5, "application/json", "text/html"))
-	r.Route("/update", func(r chi.Router) {
-		r.Post("/{metrictype}/{metricname}/{metricvalue}", server.UpdateHandler)
-		r.Post("/", server.UpdateMetricJSONHandler)
-	})
-	r.Get("/", server.GetMainHandler)
-	r.Route("/value", func(r chi.Router) {
-		r.Get("/{metrictype}/{metricname}", server.GetMetricHandler)
-		r.Post("/", server.ReadMetricJSONHandler)
-	})
-	if err := http.ListenAndServe(server.url, r); err != nil {
-		server.logger.Fatalw(err.Error(), "event", "start server")
-	}
-}
-
 // Обработчик для вывод всех метрик в html страницу
 func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -118,12 +139,10 @@ func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		w.Header().Set("Content-Type", "gzip")
-	}
+
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	tmpl.Execute(w, server.storage.ReadAll())
+	tmpl.Execute(w, server.storage.GetMetrics())
 }
 
 func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +154,7 @@ func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
 		MType: metrictype,
 	}
 
-	storageMetric, ok := server.storage.Read(metric)
+	storageMetric, ok := server.storage.GetMetricByName(metric)
 	if !ok {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -175,7 +194,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metric.Delta = &metricvalueInt64
-		resultMetric, err = server.storage.Update(metric)
+		resultMetric, err = server.storage.UpdateMetric(metric)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
@@ -189,7 +208,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metric.Value = &metricvalueFloat64
-		resultMetric, err = server.storage.Update(metric)
+		resultMetric, err = server.storage.UpdateMetric(metric)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
@@ -217,7 +236,7 @@ func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	storageMetric, ok := server.storage.Read(metric)
+	storageMetric, ok := server.storage.GetMetricByName(metric)
 	if !ok {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -234,6 +253,21 @@ func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Reque
 	w.Write(resp)
 }
 
+func gzipDecompress(body []byte) ([]byte, error) {
+	reader := bytes.NewReader(body)
+	gzreader, err := gzip.NewReader(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := io.ReadAll(gzreader)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
 	var metric metrics.Metrics
 	var buf bytes.Buffer
@@ -243,13 +277,22 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	body := buf.Bytes()
 
-	if err = json.Unmarshal(buf.Bytes(), &metric); err != nil {
+	if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+		body, err = gzipDecompress(buf.Bytes())
+		if err != nil {
+			server.logger.Infow("Unable to decompress body")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+
+	if err = json.Unmarshal(body, &metric); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	resultMetric, err := server.storage.Update(metric)
+	resultMetric, err := server.storage.UpdateMetric(metric)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return

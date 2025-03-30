@@ -28,33 +28,24 @@ func New(fileStoragePath string, recover bool, logger *zap.SugaredLogger) *MemSt
 		jsonData, err := os.ReadFile(fileStoragePath)
 		if err != nil {
 			logger.Infow("Unable to open file, creating new", "Path", fileStoragePath)
-
 			_, err := os.Create(m.fileStoragePath)
 			if err != nil {
-				m.logger.Warnw("Unable to create file", "Path", m.fileStoragePath)
-			} else {
-				m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
+				m.logger.Fatalw("Unable to create file", "Path", m.fileStoragePath)
 			}
-			// m = New(fileStoragePath, logger)
-		} else {
-			logger.Infow("File opened successfilly", "Path", fileStoragePath)
-
-			err = json.Unmarshal(jsonData, &m.db)
-			if err != nil {
-				logger.Warnw("Unable to Unmarshal structure")
-			}
-
+			m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
 		}
+		logger.Infow("File opened", "Path", fileStoragePath)
 
-		if m.db == nil {
+		err = json.Unmarshal(jsonData, &m.db)
+		if err != nil || m.db == nil {
+			logger.Warnw("Unable to Unmarshal structure, creating empty database")
 			return &MemStorage{
 				db:              make(map[string]metrics.Metrics),
 				fileStoragePath: fileStoragePath,
 				logger:          logger,
 			}
-		} else {
-			logger.Infow("Recovered sussessfully", "DB", m.db)
 		}
+		logger.Infow("Recovered sussessfully", "DB", m.db)
 	}
 	return &m
 }
@@ -78,7 +69,7 @@ func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
 	return err
 }
 
-func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
+func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error) {
 	var emptyMetric metrics.Metrics
 	err := m.validateMetric(metric)
 	if err != nil {
@@ -112,12 +103,12 @@ func (m *MemStorage) Update(metric metrics.Metrics) (metrics.Metrics, error) {
 	return m.db[metric.ID], err
 }
 
-func (m *MemStorage) Read(metric metrics.Metrics) (metrics.Metrics, bool) {
+func (m *MemStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool) {
 	result, ok := m.db[metric.ID]
 	return result, ok
 }
 
-func (m *MemStorage) ReadAll() map[string]string {
+func (m *MemStorage) GetMetrics() map[string]string {
 	result := make(map[string]string)
 	for id, metric := range m.db {
 		switch metric.MType {
@@ -130,11 +121,11 @@ func (m *MemStorage) ReadAll() map[string]string {
 	return result
 }
 
-func (m *MemStorage) BackupService(storeInterval int, shutdown bool) {
-	SaveDatabase := func() {
+func (m *MemStorage) BackupService(storeInterval int, shutdown bool) error {
+	SaveDatabase := func() error {
 		file, err := os.Create(m.fileStoragePath)
 		if err != nil {
-			m.logger.Warnw("Unable to create file", "Path", m.fileStoragePath)
+			return err
 		} else {
 			m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
 		}
@@ -148,17 +139,24 @@ func (m *MemStorage) BackupService(storeInterval int, shutdown bool) {
 		} else {
 			m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
 		}
+		return nil
 	}
 
 	if shutdown {
-		m.logger.Infow("Shutting down")
-		SaveDatabase()
-		time.Sleep(time.Duration(2) * time.Second)
-		return
+		m.logger.Infow("Backing up storage before shutdown")
+		err := SaveDatabase()
+		if err != nil {
+			return err
+		}
+		// time.Sleep(time.Duration(2) * time.Second)
+		return nil
 	}
 
 	for {
 		time.Sleep(time.Duration(storeInterval) * time.Second)
-		SaveDatabase()
+		err := SaveDatabase()
+		if err != nil {
+			return err
+		}
 	}
 }
