@@ -77,10 +77,11 @@ func (server *Server) Shutdown() {
 	server.logger.Infow(
 		"Shutting down server",
 		"url", server.HttpServer.Addr)
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := server.HttpServer.Shutdown(ctx); err != nil {
 		server.logger.Fatalw(err.Error(), "event", "shutdown server")
 	}
+	defer cancel()
 }
 
 type (
