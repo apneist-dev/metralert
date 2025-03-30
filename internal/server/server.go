@@ -31,7 +31,7 @@ type StorageInterface interface {
 type Server struct {
 	storage    StorageInterface
 	logger     *zap.SugaredLogger
-	HttpServer *http.Server
+	HTTPServer *http.Server
 	Router     *chi.Mux
 }
 
@@ -54,7 +54,7 @@ func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Serv
 	s.storage = repo
 	s.logger = logger
 
-	s.HttpServer = &http.Server{
+	s.HTTPServer = &http.Server{
 		Addr:    address,
 		Handler: s.Router,
 	}
@@ -65,9 +65,9 @@ func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Serv
 func (server *Server) Start() {
 	server.logger.Infow(
 		"Starting server",
-		"url", server.HttpServer.Addr)
+		"url", server.HTTPServer.Addr)
 
-	err := server.HttpServer.ListenAndServe()
+	err := server.HTTPServer.ListenAndServe()
 	if err != http.ErrServerClosed {
 		server.logger.Fatalw("Unable to start server:", err)
 	}
@@ -76,9 +76,9 @@ func (server *Server) Start() {
 func (server *Server) Shutdown() {
 	server.logger.Infow(
 		"Shutting down server",
-		"url", server.HttpServer.Addr)
+		"url", server.HTTPServer.Addr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := server.HttpServer.Shutdown(ctx); err != nil {
+	if err := server.HTTPServer.Shutdown(ctx); err != nil {
 		server.logger.Fatalw(err.Error(), "event", "shutdown server")
 	}
 	defer cancel()
