@@ -45,7 +45,8 @@ func New(fileStoragePath string, recover bool, logger *zap.SugaredLogger) *MemSt
 				logger:          logger,
 			}
 		}
-		logger.Infow("Recovered sussessfully", "DB", m.db)
+		logger.Infow("Recovered sussessfully")
+		logger.Debugw("Recovered database", "DB", m.db)
 	}
 	return &m
 }
@@ -126,19 +127,21 @@ func (m *MemStorage) BackupService(storeInterval int, shutdown bool) error {
 		file, err := os.Create(m.fileStoragePath)
 		if err != nil {
 			return err
-		} else {
-			m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
 		}
+		m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
+
 		data, err := json.Marshal(m.db)
 		if err != nil {
-			m.logger.Warnw("Unable to Unmarshal structure")
+			m.logger.Warnw("Unable to marshal structure")
 		}
 		_, err1 := file.Write(data)
 		if err1 != nil {
 			m.logger.Warnw("Unable to write to file", "Path", m.fileStoragePath)
-		} else {
-			m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
+			return nil
 		}
+
+		m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
+
 		return nil
 	}
 
@@ -148,7 +151,6 @@ func (m *MemStorage) BackupService(storeInterval int, shutdown bool) error {
 		if err != nil {
 			return err
 		}
-		// time.Sleep(time.Duration(2) * time.Second)
 		return nil
 	}
 

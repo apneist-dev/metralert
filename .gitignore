@@ -25,6 +25,7 @@ vendor/
 .vscode
 
 # Local files for testing
+file.txt
 metrics_database.json
 /bruno
 /autotests

@@ -53,7 +53,7 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 		reportInterval:   reportInterval,
 		pollCount:        metrics.Counter(0),
 		mutex:            sync.Mutex{},
-		memoryStatistics: make([]metrics.Metrics, 40),
+		memoryStatistics: []metrics.Metrics{},
 		rtm:              runtime.MemStats{},
 		client: http.Client{
 			Timeout:   3 * time.Second,
@@ -118,6 +118,7 @@ func (a *Agent) CollectMetric() {
 		time.Sleep(time.Duration(a.pollInterval) * time.Second)
 
 		a.mutex.Lock()
+		a.memoryStatistics = make([]metrics.Metrics, len(result))
 		copy(a.memoryStatistics, result)
 		a.mutex.Unlock()
 
