@@ -20,7 +20,7 @@ func (cfg *Config) GetConfig() {
 		log.Println("Переменная окружения ADDRESS не определена")
 	}
 	if cfg.ServerAddress == "" {
-		flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "server url")
+		flag.StringVar(&cfg.ServerAddress, "a", "http://localhost:8080", "server url")
 	}
 
 	if cfg.ReportInterval == 0 {

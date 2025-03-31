@@ -4,16 +4,37 @@ import (
 	"log"
 	"metralert/internal/server"
 	"metralert/internal/storage"
+	"os"
+	"os/signal"
 
 	serverconfig "metralert/config/server"
+
+	"go.uber.org/zap"
 )
 
 func main() {
+
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, os.Interrupt)
+
 	cfg := serverconfig.Config{}
 	cfg.GetConfig()
 
-	storage := storage.New()
-	server := server.New(cfg.ServerAddress, &storage)
-	log.Printf("Запущен сервер с адресом %s", cfg.ServerAddress)
-	server.Start()
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer logger.Sync()
+	sugar := logger.Sugar()
+
+	storage := storage.New(cfg.FileStoragePath, cfg.Restore, sugar)
+
+	go storage.BackupService(cfg.StoreInterval, false)
+	server := server.New(cfg.ServerAddress, storage, sugar)
+	go server.Start()
+
+	<-shutdownCh
+	server.Shutdown()
+	storage.BackupService(cfg.StoreInterval, true)
+
 }
