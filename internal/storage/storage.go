@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 )
 
@@ -15,13 +18,15 @@ type MemStorage struct {
 	db              map[string]metrics.Metrics
 	fileStoragePath string
 	logger          *zap.SugaredLogger
+	databaseAddress string
 }
 
-func New(fileStoragePath string, recover bool, logger *zap.SugaredLogger) *MemStorage {
+func New(fileStoragePath string, recover bool, databaseAddress string, logger *zap.SugaredLogger) *MemStorage {
 	m := MemStorage{
 		db:              make(map[string]metrics.Metrics),
 		fileStoragePath: fileStoragePath,
 		logger:          logger,
+		databaseAddress: databaseAddress,
 	}
 
 	if recover {
@@ -161,4 +166,22 @@ func (m *MemStorage) BackupService(storeInterval int, shutdown bool) error {
 			return err
 		}
 	}
+}
+
+func (m *MemStorage) PingDatabase() error {
+	ps := m.databaseAddress
+
+	db, err := sql.Open("pgx", ps)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	if err = db.PingContext(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }

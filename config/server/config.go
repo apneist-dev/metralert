@@ -13,6 +13,7 @@ type Config struct {
 	StoreInterval   int    `env:"STORE_INTERVAL"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 	Restore         bool   `env:"RESTORE"`
+	DatabaseAddress string `env:"DATABASE_DSN"`
 }
 
 func (cfg *Config) GetConfig() {
@@ -34,6 +35,9 @@ func (cfg *Config) GetConfig() {
 	}
 	if !cfg.Restore && !RestoreSet {
 		flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
+	}
+	if cfg.DatabaseAddress == "" {
+		flag.StringVar(&cfg.DatabaseAddress, "d", "host=localhost user=metralert password=metralert dbname=metralert sslmode=disable", "database address")
 	}
 
 	flag.Parse()

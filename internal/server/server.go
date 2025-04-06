@@ -26,6 +26,7 @@ type StorageInterface interface {
 	UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error)
 	GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool)
 	GetMetrics() map[string]string
+	PingDatabase() error
 }
 
 type Server struct {
@@ -41,6 +42,7 @@ func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Serv
 	s.Router.Use(s.loggingMiddleware)
 
 	s.Router.Use(middleware.Compress(5, "application/json", "text/html"))
+	s.Router.Get("/ping", s.DatabasePinger)
 	s.Router.Route("/update", func(router chi.Router) {
 		router.Post("/{metrictype}/{metricname}/{metricvalue}", s.UpdateHandler)
 		router.Post("/", s.UpdateMetricJSONHandler)
@@ -308,4 +310,14 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+}
+
+func (server *Server) DatabasePinger(w http.ResponseWriter, r *http.Request) {
+	err := server.storage.PingDatabase()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
