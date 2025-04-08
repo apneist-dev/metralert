@@ -37,7 +37,7 @@ func (cfg *Config) GetConfig() {
 		flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
 	}
 	if cfg.DatabaseAddress == "" {
-		flag.StringVar(&cfg.DatabaseAddress, "d", "host=localhost user=postgres password=postgres dbname=postgres sslmode=disable", "database address")
+		flag.StringVar(&cfg.DatabaseAddress, "d", "", "database dsn")
 	}
 
 	flag.Parse()

@@ -24,24 +24,24 @@ type MemStorage struct {
 }
 
 const (
-	CREATE_TABLE = `CREATE TABLE IF NOT EXISTS metrics (
+	SqlCreateTable = `CREATE TABLE IF NOT EXISTS metrics (
 		"id" VARCHAR(250) PRIMARY KEY,
 		"mtype" VARCHAR(250) NOT NULL DEFAULT '',
 		"delta" BIGINT,
 		"value" DOUBLE PRECISION
 	) `
-	UPDATE_COUNTER = `INSERT INTO metrics (id, mtype, delta)
+	SqlUpdateCounter = `INSERT INTO metrics (id, mtype, delta)
     	VALUES ( $1 , 'counter', $2 )
 		ON CONFLICT (id) 
 		DO UPDATE SET delta = $2 + metrics.delta
 		RETURNING id, mtype, delta`
-	UPDATE_GAUGE = `INSERT INTO metrics (id, mtype, value)
+	SqlUpdateGauge = `INSERT INTO metrics (id, mtype, value)
     	VALUES ( $1 , 'gauge', $2 )
 		ON CONFLICT (id) 
 		DO UPDATE SET value = $2
 		RETURNING id, mtype, value`
-	GET_METRIC  = `SELECT id, mtype, delta, value FROM metrics WHERE id = $1`
-	GET_METRICS = `SELECT id, mtype, delta, value FROM metrics`
+	SqlGetMetric  = `SELECT id, mtype, delta, value FROM metrics WHERE id = $1`
+	SqlGetMetrics = `SELECT id, mtype, delta, value FROM metrics`
 )
 
 func New(fileStoragePath string, recover bool, databaseAddress string, logger *zap.SugaredLogger) *MemStorage {
@@ -60,7 +60,7 @@ func New(fileStoragePath string, recover bool, databaseAddress string, logger *z
 		m.logger.Infow("Database connected")
 		m.database = database
 
-		_, err = m.database.ExecContext(m.ctx, CREATE_TABLE)
+		_, err = m.database.ExecContext(m.ctx, SqlCreateTable)
 		if err != nil {
 			m.logger.Fatalw("Unable to create table")
 		}
@@ -125,7 +125,7 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		switch metric.MType {
 		case "gauge":
 			var scannedGauge metrics.Metrics
-			err := m.database.QueryRowContext(m.ctx, UPDATE_GAUGE,
+			err := m.database.QueryRowContext(m.ctx, SqlUpdateGauge,
 				metric.ID,
 				metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 
@@ -133,7 +133,7 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 
 		case "counter":
 			var scannedCounter metrics.Metrics
-			err := m.database.QueryRowContext(m.ctx, UPDATE_COUNTER,
+			err := m.database.QueryRowContext(m.ctx, SqlUpdateCounter,
 				metric.ID,
 				metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
@@ -177,7 +177,7 @@ func (m *MemStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, b
 	if m.database != nil {
 		ok := true
 		result := metrics.Metrics{}
-		err := m.database.QueryRowContext(m.ctx, GET_METRIC,
+		err := m.database.QueryRowContext(m.ctx, SqlGetMetric,
 			metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
 		if err != nil {
 			ok = false
@@ -195,7 +195,7 @@ func (m *MemStorage) GetMetrics() map[string]any {
 	if m.database != nil {
 		// var allMetrics []metrics.Metrics
 		result := make(map[string]any)
-		rows, err := m.database.QueryContext(m.ctx, GET_METRICS)
+		rows, err := m.database.QueryContext(m.ctx, SqlGetMetrics)
 		if err != nil {
 			m.logger.Warnw("get_metrics error")
 		}
