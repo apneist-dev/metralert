@@ -25,7 +25,7 @@ import (
 type StorageInterface interface {
 	UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error)
 	GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool)
-	GetMetrics() map[string]string
+	GetMetrics() map[string]any
 	PingDatabase() error
 }
 

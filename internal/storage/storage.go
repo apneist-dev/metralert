@@ -19,7 +19,30 @@ type MemStorage struct {
 	fileStoragePath string
 	logger          *zap.SugaredLogger
 	database        *sql.DB
+	ctx             context.Context
+	ctxCancel       context.CancelFunc
 }
+
+const (
+	CREATE_TABLE = `CREATE TABLE IF NOT EXISTS metrics (
+		"id" VARCHAR(250) PRIMARY KEY,
+		"mtype" VARCHAR(250) NOT NULL DEFAULT '',
+		"delta" BIGINT,
+		"value" DOUBLE PRECISION
+	) `
+	UPDATE_COUNTER = `INSERT INTO metrics (id, mtype, delta)
+    	VALUES ( $1 , 'counter', $2 )
+		ON CONFLICT (id) 
+		DO UPDATE SET delta = $2 + metrics.delta
+		RETURNING id, mtype, delta`
+	UPDATE_GAUGE = `INSERT INTO metrics (id, mtype, value)
+    	VALUES ( $1 , 'gauge', $2 )
+		ON CONFLICT (id) 
+		DO UPDATE SET value = $2
+		RETURNING id, mtype, value`
+	GET_METRIC  = `SELECT id, mtype, delta, value FROM metrics WHERE id = $1`
+	GET_METRICS = `SELECT id, mtype, delta, value FROM metrics`
+)
 
 func New(fileStoragePath string, recover bool, databaseAddress string, logger *zap.SugaredLogger) *MemStorage {
 	m := MemStorage{
@@ -27,13 +50,21 @@ func New(fileStoragePath string, recover bool, databaseAddress string, logger *z
 		fileStoragePath: fileStoragePath,
 		logger:          logger,
 	}
+	m.ctx, m.ctxCancel = context.WithCancel(context.Background())
 
 	if databaseAddress != "" {
 		database, err := sql.Open("pgx", databaseAddress)
 		if err != nil {
 			m.logger.Fatalw("Unable to open DB")
 		}
+		m.logger.Infow("Database connected")
 		m.database = database
+
+		_, err = m.database.ExecContext(m.ctx, CREATE_TABLE)
+		if err != nil {
+			m.logger.Fatalw("Unable to create table")
+		}
+		return &m
 	}
 
 	if recover {
@@ -89,6 +120,31 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		return emptyMetric, err
 	}
 
+	// case database
+	if m.database != nil {
+		switch metric.MType {
+		case "gauge":
+			var scannedGauge metrics.Metrics
+			err := m.database.QueryRowContext(m.ctx, UPDATE_GAUGE,
+				metric.ID,
+				metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+
+			return scannedGauge, err
+
+		case "counter":
+			var scannedCounter metrics.Metrics
+			err := m.database.QueryRowContext(m.ctx, UPDATE_COUNTER,
+				metric.ID,
+				metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+
+			return scannedCounter, err
+		default:
+			err = errors.New("invalid Mtype")
+			return metrics.Metrics{}, err
+		}
+	}
+
+	// case in-memory
 	switch metric.MType {
 	case "gauge":
 		m.db[metric.ID] = metrics.Metrics{
@@ -117,12 +173,69 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 }
 
 func (m *MemStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool) {
+	// case database
+	if m.database != nil {
+		ok := true
+		result := metrics.Metrics{}
+		err := m.database.QueryRowContext(m.ctx, GET_METRIC,
+			metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
+		if err != nil {
+			ok = false
+		}
+		return result, ok
+	}
+
+	// case in-memory
 	result, ok := m.db[metric.ID]
 	return result, ok
 }
 
-func (m *MemStorage) GetMetrics() map[string]string {
-	result := make(map[string]string)
+func (m *MemStorage) GetMetrics() map[string]any {
+	// case database
+	if m.database != nil {
+		// var allMetrics []metrics.Metrics
+		result := make(map[string]any)
+		rows, err := m.database.QueryContext(m.ctx, GET_METRICS)
+		if err != nil {
+			m.logger.Warnw("get_metrics error")
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var metric metrics.Metrics
+			err = rows.Scan(&metric.ID, &metric.MType, &metric.Delta, &metric.Value)
+			if err != nil {
+				m.logger.Warnw("got error when reading metric")
+			}
+
+			// allMetrics = append(allMetrics, metric)
+
+			switch metric.MType {
+			case "gauge":
+				// защищаемся от nil dereference
+				if metric.Value == nil {
+					continue
+				}
+				result[metric.ID] = fmt.Sprintf("%f", *metric.Value)
+			case "counter":
+				// защищаемся от nil dereference
+				if metric.Delta == nil {
+					continue
+				}
+				result[metric.ID] = fmt.Sprintf("%d", *metric.Delta)
+			}
+		}
+
+		err = rows.Err()
+		if err != nil {
+			m.logger.Warnw("get_metrics error")
+		}
+
+		return result
+	}
+
+	// case in-memory
+	result := make(map[string]any)
 	for id, metric := range m.db {
 		switch metric.MType {
 		case "gauge":
@@ -169,6 +282,7 @@ func (m *MemStorage) BackupService(storeInterval int) error {
 func (m *MemStorage) Shutdown() error {
 	m.logger.Infow("Backing up storage before shutdown")
 	if m.database != nil {
+		m.ctxCancel()
 		m.database.Close()
 		return nil
 	}
@@ -181,13 +295,6 @@ func (m *MemStorage) Shutdown() error {
 }
 
 func (m *MemStorage) PingDatabase() error {
-	// ps := m.databaseAddress
-
-	// db, err := sql.Open("pgx", ps)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer db.Close()
 	if m.database == nil {
 		return errors.New("no database connected")
 	}
