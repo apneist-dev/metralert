@@ -27,15 +27,14 @@ func main() {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
-
 	storage := storage.New(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
 
-	go storage.BackupService(cfg.StoreInterval, false)
+	go storage.BackupService(cfg.StoreInterval)
 	server := server.New(cfg.ServerAddress, storage, sugar)
 	go server.Start()
 
 	<-shutdownCh
 	server.Shutdown()
-	storage.BackupService(cfg.StoreInterval, true)
+	storage.Shutdown()
 
 }

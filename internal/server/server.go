@@ -320,4 +320,5 @@ func (server *Server) DatabasePinger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "database is accessed\n")
 }

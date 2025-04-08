@@ -18,7 +18,7 @@ type MemStorage struct {
 	db              map[string]metrics.Metrics
 	fileStoragePath string
 	logger          *zap.SugaredLogger
-	databaseAddress string
+	database        *sql.DB
 }
 
 func New(fileStoragePath string, recover bool, databaseAddress string, logger *zap.SugaredLogger) *MemStorage {
@@ -26,7 +26,14 @@ func New(fileStoragePath string, recover bool, databaseAddress string, logger *z
 		db:              make(map[string]metrics.Metrics),
 		fileStoragePath: fileStoragePath,
 		logger:          logger,
-		databaseAddress: databaseAddress,
+	}
+
+	if databaseAddress != "" {
+		database, err := sql.Open("pgx", databaseAddress)
+		if err != nil {
+			m.logger.Fatalw("Unable to open DB")
+		}
+		m.database = database
 	}
 
 	if recover {
@@ -127,59 +134,67 @@ func (m *MemStorage) GetMetrics() map[string]string {
 	return result
 }
 
-func (m *MemStorage) BackupService(storeInterval int, shutdown bool) error {
-	SaveDatabase := func() error {
-		file, err := os.Create(m.fileStoragePath)
-		if err != nil {
-			return err
-		}
-		m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
+func (m *MemStorage) SaveDatabase() error {
+	file, err := os.Create(m.fileStoragePath)
+	if err != nil {
+		return err
+	}
+	m.logger.Infow("File created successfilly", "Path", m.fileStoragePath)
 
-		data, err := json.Marshal(m.db)
-		if err != nil {
-			m.logger.Warnw("Unable to marshal structure")
-		}
-		_, err1 := file.Write(data)
-		if err1 != nil {
-			m.logger.Warnw("Unable to write to file", "Path", m.fileStoragePath)
-			return nil
-		}
-
-		m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
-
+	data, err := json.Marshal(m.db)
+	if err != nil {
+		m.logger.Warnw("Unable to marshal structure")
+	}
+	_, err1 := file.Write(data)
+	if err1 != nil {
+		m.logger.Warnw("Unable to write to file", "Path", m.fileStoragePath)
 		return nil
 	}
 
-	if shutdown {
-		m.logger.Infow("Backing up storage before shutdown")
-		err := SaveDatabase()
-		if err != nil {
-			return err
-		}
-		return nil
-	}
+	m.logger.Infow("Database saved to file sucessfully", "Path", m.fileStoragePath)
+
+	return nil
+}
+func (m *MemStorage) BackupService(storeInterval int) error {
 
 	for {
 		time.Sleep(time.Duration(storeInterval) * time.Second)
-		err := SaveDatabase()
+		err := m.SaveDatabase()
 		if err != nil {
 			return err
 		}
 	}
 }
 
-func (m *MemStorage) PingDatabase() error {
-	ps := m.databaseAddress
-
-	db, err := sql.Open("pgx", ps)
-	if err != nil {
-		panic(err)
+func (m *MemStorage) Shutdown() error {
+	m.logger.Infow("Backing up storage before shutdown")
+	if m.database != nil {
+		m.database.Close()
+		return nil
 	}
-	defer db.Close()
+
+	err := m.SaveDatabase()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MemStorage) PingDatabase() error {
+	// ps := m.databaseAddress
+
+	// db, err := sql.Open("pgx", ps)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer db.Close()
+	if m.database == nil {
+		return errors.New("no database connected")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	if err = db.PingContext(ctx); err != nil {
+	if err := m.database.PingContext(ctx); err != nil {
 		return err
 	}
 
