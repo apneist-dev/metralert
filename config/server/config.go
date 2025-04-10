@@ -26,15 +26,23 @@ func (cfg *Config) GetConfig() {
 
 	if cfg.ServerAddress == "" {
 		flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "server url")
+	} else {
+		flag.String("a", "localhost:8080", "server url")
 	}
 	if cfg.StoreInterval == 0 && !StoreIntervalSet {
 		flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
+	} else {
+		flag.Int("i", 300, "file swap interval")
 	}
 	if cfg.FileStoragePath == "" {
 		flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
+	} else {
+		flag.String("f", "metrics_database.json", "filename to store metrics")
 	}
 	if !RestoreSet && !cfg.Restore {
 		flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
+	} else {
+		flag.Bool("r", true, "restore metrics on startup")
 	}
 	// "host=localhost user=postgres password=postgres dbname=postgres sslmode=disable"
 	// "postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable"
