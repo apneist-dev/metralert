@@ -62,7 +62,7 @@ func New(fileStoragePath string, recover bool, databaseAddress string, logger *z
 
 		_, err = m.database.ExecContext(m.ctx, SQLCreateTable)
 		if err != nil {
-			m.logger.Fatalw("Unable to create table")
+			m.logger.Fatalw("Unable to create table", "error", err)
 		}
 		return &m
 	}
@@ -96,10 +96,10 @@ func New(fileStoragePath string, recover bool, databaseAddress string, logger *z
 
 func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
 	var err error
-	currentMetric, ok := m.db[metric.ID]
-	if ok && currentMetric.MType != metric.MType {
-		return fmt.Errorf("metric %s exists with another type %s", metric.ID, m.db[metric.ID].MType)
-	}
+	// currentMetric, ok := m.db[metric.ID]
+	// if ok && currentMetric.MType != metric.MType {
+	// 	return fmt.Errorf("metric %s exists with another type %s", metric.ID, m.db[metric.ID].MType)
+	// }
 	switch metric.MType {
 	case "gauge":
 		if metric.Value == nil {
@@ -170,6 +170,104 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		err = errors.New("invalid Mtype")
 	}
 	return m.db[metric.ID], err
+}
+
+func (m *MemStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
+	var result []metrics.Metrics
+	var errs []error
+
+	// var emptyMetric metrics.Metrics
+	// err := m.validateMetric(metric)
+	// if err != nil {
+	// 	return emptyMetric, err
+	// }
+
+	// case database
+	if m.database != nil {
+		ctx, cancel := context.WithTimeout(m.ctx, time.Second*120) //120 for for debug
+		defer cancel()
+
+		tx, err := m.database.Begin()
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+
+		stmtCounter, err := tx.PrepareContext(ctx, SQLUpdateCounter)
+		if err != nil {
+			return nil, err
+		}
+
+		stmtGauge, err := tx.PrepareContext(ctx, SQLUpdateGauge)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, metric := range metricsSlice {
+			switch metric.MType {
+			case "gauge":
+				var scannedGauge metrics.Metrics
+				err := stmtGauge.QueryRowContext(ctx, metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+
+				result = append(result, scannedGauge)
+				if err != nil {
+					errs = append(errs, err)
+				}
+
+			case "counter":
+				var scannedCounter metrics.Metrics
+				err := stmtCounter.QueryRowContext(ctx, metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+
+				result = append(result, scannedCounter)
+				if err != nil {
+					errs = append(errs, err)
+				}
+
+			default:
+				err := errors.New("invalid Mtype")
+				errs = append(errs, err)
+
+			}
+		}
+		err = tx.Commit()
+		if err != nil {
+			errs = append(errs, err)
+			return nil, errors.Join(errs...)
+		}
+		return result, errors.Join(errs...)
+	}
+
+	// case in-memory
+	for _, metric := range metricsSlice {
+		switch metric.MType {
+		case "gauge":
+			m.db[metric.ID] = metrics.Metrics{
+				ID:    metric.ID,
+				MType: metric.MType,
+				Value: metric.Value,
+			}
+			result = append(result, m.db[metric.ID])
+		case "counter":
+			var newDelta int64
+			_, ok := m.db[metric.ID]
+			if !ok {
+				newDelta = (int64)(*metric.Delta)
+			} else {
+				newDelta = *m.db[metric.ID].Delta + (int64)(*metric.Delta)
+			}
+			m.db[metric.ID] = metrics.Metrics{
+				ID:    metric.ID,
+				MType: metric.MType,
+				Delta: &newDelta,
+				// Value: &newValue,
+			}
+			result = append(result, m.db[metric.ID])
+		default:
+			err := errors.New("invalid Mtype")
+			errs = append(errs, err)
+		}
+	}
+	return result, errors.Join(errs...)
 }
 
 func (m *MemStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool) {

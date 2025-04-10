@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	updatePath = "/update/"
+	updatePath      = "/update/"
+	batchUpdatePath = "/updates/"
 )
 
 type Agent struct {
@@ -33,10 +34,11 @@ type Agent struct {
 	rtm              runtime.MemStats
 	client           http.Client
 	logger           *zap.SugaredLogger
+	batch            bool
 }
 
 // Конструктор агента
-func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger) *Agent {
+func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger, batch bool) *Agent {
 	if !strings.Contains(address, "http") {
 		address = "http://" + address
 	}
@@ -60,6 +62,7 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 			Transport: transport,
 		},
 		logger: logger,
+		batch:  batch,
 	}
 }
 
@@ -181,7 +184,7 @@ func (a *Agent) SendAllMetrics() error {
 		memoryStatisticsCopy := make([]metrics.Metrics, len(a.memoryStatistics))
 		copy(memoryStatisticsCopy, a.memoryStatistics)
 		a.mutex.Unlock()
-		a.logger.Infow("Waiting for server")
+		// a.logger.Infow("Waiting for server")
 		for {
 			resp, err := a.client.Get(a.BaseURL)
 			if err != nil {
@@ -190,18 +193,53 @@ func (a *Agent) SendAllMetrics() error {
 			resp.Body.Close()
 			break
 		}
-		a.logger.Infow("Server is reachable")
-		for _, s := range memoryStatisticsCopy {
-			resp, err := a.SendPost(s)
-			if err != nil {
-				log.Printf("При отправке метрик произошла ошибка: %v", err)
+		// a.logger.Infow("Server is reachable")
+		// batch mode
+		if a.batch {
+			endpoint := a.BaseURL + batchUpdatePath
+			if len(memoryStatisticsCopy) == 0 {
 				continue
 			}
-			a.logger.Infow("Response received",
-				"status", resp.StatusCode,
-				"Content-Type", resp.Header.Get("Content-Type"),
-				"Content-Encoding", resp.Header.Get("Content-Encoding"))
-			resp.Body.Close()
+			jsonData, err := json.Marshal(memoryStatisticsCopy)
+			if err != nil {
+				a.logger.Fatalw("unable to marshal []metric")
+			}
+
+			compressedBody, err := gzipCompress(jsonData)
+			if err != nil {
+				a.logger.Fatalw("Unable to compress body")
+			}
+
+			req, err := http.NewRequest("POST", endpoint, compressedBody)
+			if err != nil {
+				a.logger.Fatalw("Unable to form request")
+			}
+
+			req.Header.Set("Content-Encoding", "gzip")
+			req.Header.Add("Content-Type", "application/json")
+
+			resp, err := a.client.Do(req)
+			if err != nil {
+				return err
+			}
+			a.logger.Infow("Batch Metrics sent successfully")
+			defer resp.Body.Close()
+		}
+
+		// single metric mode
+		if !a.batch {
+			for _, s := range memoryStatisticsCopy {
+				resp, err := a.SendPost(s)
+				if err != nil {
+					log.Printf("При отправке метрик произошла ошибка: %v", err)
+					continue
+				}
+				a.logger.Infow("Response received",
+					"status", resp.StatusCode,
+					"Content-Type", resp.Header.Get("Content-Type"),
+					"Content-Encoding", resp.Header.Get("Content-Encoding"))
+				resp.Body.Close()
+			}
 		}
 		time.Sleep(time.Duration(a.reportInterval) * time.Second)
 	}

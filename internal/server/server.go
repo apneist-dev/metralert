@@ -24,6 +24,7 @@ import (
 
 type StorageInterface interface {
 	UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error)
+	UpdateBatchMetrics(metrics []metrics.Metrics) ([]metrics.Metrics, error)
 	GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool)
 	GetMetrics() map[string]any
 	PingDatabase() error
@@ -52,6 +53,7 @@ func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Serv
 		router.Get("/{metrictype}/{metricname}", s.GetMetricHandler)
 		router.Post("/", s.ReadMetricJSONHandler)
 	})
+	s.Router.Post("/updates/", s.UpdateBatchMetricsJSONHandler)
 
 	s.storage = repo
 	s.logger = logger
@@ -302,6 +304,47 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	resp, err := json.Marshal(resultMetric)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
+func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metrics []metrics.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	body := buf.Bytes()
+
+	if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+		body, err = gzipDecompress(buf.Bytes())
+		if err != nil {
+			server.logger.Infow("Unable to decompress body")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+
+	if err = json.Unmarshal(body, &metrics); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resultMetrics, err := server.storage.UpdateBatchMetrics(metrics)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := json.Marshal(resultMetrics)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
