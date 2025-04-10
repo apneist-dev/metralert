@@ -28,6 +28,7 @@ func main() {
 	sugar := logger.Sugar()
 
 	storage := storage.New(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
+	sugar.Infow("Config", "cfg.ServerAddress", cfg.ServerAddress, "cfg.Restore", cfg.Restore, "cfg.FileStoragePath", cfg.FileStoragePath, "cfg.DatabaseAddress", cfg.DatabaseAddress, "cfg.StoreInterval", cfg.StoreInterval)
 
 	go storage.BackupService(cfg.StoreInterval)
 	server := server.New(cfg.ServerAddress, storage, sugar)

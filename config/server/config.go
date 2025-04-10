@@ -33,7 +33,7 @@ func (cfg *Config) GetConfig() {
 	if cfg.FileStoragePath == "" {
 		flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
 	}
-	if !cfg.Restore && !RestoreSet {
+	if !RestoreSet && !cfg.Restore {
 		flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
 	}
 	// "host=localhost user=postgres password=postgres dbname=postgres sslmode=disable"
