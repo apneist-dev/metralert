@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"go.uber.org/zap"
 )
 
@@ -49,6 +50,17 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 	transport := &http.Transport{
 		DisableCompression: false,
 	}
+
+	retryClient := *retryablehttp.NewClient()
+	retryClient.HTTPClient.Transport = transport
+	retryClient.RetryMax = 3
+	retryClient.RetryWaitMin = 1
+	retryClient.RetryWaitMax = 5
+	retryClient.Backoff = retryablehttp.LinearJitterBackoff
+	retryClient.Logger = nil
+
+	standardClient := *retryClient.StandardClient()
+
 	return &Agent{
 		BaseURL:          destinationAddress.String(),
 		pollInterval:     pollInterval,
@@ -57,12 +69,9 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 		mutex:            sync.Mutex{},
 		memoryStatistics: []metrics.Metrics{},
 		rtm:              runtime.MemStats{},
-		client: http.Client{
-			Timeout:   3 * time.Second,
-			Transport: transport,
-		},
-		logger: logger,
-		batch:  batch,
+		client:           standardClient,
+		logger:           logger,
+		batch:            batch,
 	}
 }
 
