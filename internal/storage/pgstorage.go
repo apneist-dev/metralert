@@ -12,10 +12,56 @@ import (
 )
 
 type PgStorage struct {
-	database  *sql.DB
-	logger    *zap.SugaredLogger
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+	database *sql.DB
+	logger   *zap.SugaredLogger
+	// ctx       context.Context
+	// ctxCancel context.CancelFunc
+}
+
+func RetryQueryRow(ctx context.Context, db *sql.DB, query string, args []any, scans []any) error {
+	var errs []error
+
+	for i := range 3 {
+		err := db.QueryRowContext(ctx, query, args...).Scan(scans...)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, err)
+		delay := (i*2 + 1)
+		time.Sleep(time.Duration(delay) * time.Second)
+	}
+	return errors.Join(errs...)
+}
+
+func RetryQueryWithStmt(ctx context.Context, stmt *sql.Stmt, args []any, scans []any) error {
+	var errs []error
+
+	for i := range 3 {
+		err := stmt.QueryRowContext(ctx, args...).Scan(scans...)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, err)
+		delay := (i*2 + 1)
+		time.Sleep(time.Duration(delay) * time.Second)
+	}
+	return errors.Join(errs...)
+}
+
+func RetryQuery(ctx context.Context, db *sql.DB, query string) (*sql.Rows, error) {
+	var errs []error
+	var rows *sql.Rows
+
+	for i := range 3 {
+		rows, err := db.QueryContext(ctx, query)
+		if err == nil {
+			return rows, nil
+		}
+		errs = append(errs, err)
+		delay := (i*2 + 1)
+		time.Sleep(time.Duration(delay) * time.Second)
+	}
+	return rows, errors.Join(errs...)
 }
 
 func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage {
@@ -30,8 +76,8 @@ func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage 
 		"value" DOUBLE PRECISION
 	) `
 
-	pg.ctx, pg.ctxCancel = context.WithCancel(context.Background())
-	// defer pg.ctxCancel()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ctxCancel()
 
 	database, err := sql.Open("pgx", databaseAddress)
 	if err != nil {
@@ -40,7 +86,7 @@ func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage 
 	pg.logger.Infow("Database connected")
 	pg.database = database
 
-	_, err = pg.database.ExecContext(pg.ctx, queryCreateTable)
+	_, err = pg.database.ExecContext(ctx, queryCreateTable)
 	if err != nil {
 		pg.logger.Fatalw("Unable to create table", "error", err)
 	}
@@ -64,20 +110,31 @@ func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		RETURNING id, mtype, delta
 		`
 
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ctxCancel()
+
 	switch metric.MType {
 	case "gauge":
 		var scannedGauge metrics.Metrics
-		err := pg.database.QueryRowContext(pg.ctx, queryUpdateGauge,
-			metric.ID,
-			metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+		// err := pg.database.QueryRowContext(ctx, queryUpdateGauge,
+		// 	metric.ID,
+		// 	metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+
+		err := RetryQueryRow(ctx, pg.database, queryUpdateGauge,
+			[]any{metric.ID, metric.Value},
+			[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
 
 		return scannedGauge, err
 
 	case "counter":
 		var scannedCounter metrics.Metrics
-		err := pg.database.QueryRowContext(pg.ctx, queryUpdateCounter,
-			metric.ID,
-			metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+		// err := pg.database.QueryRowContext(ctx, queryUpdateCounter,
+		// 	metric.ID,
+		// 	metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+
+		err := RetryQueryRow(ctx, pg.database, queryUpdateCounter,
+			[]any{metric.ID, metric.Delta},
+			[]any{&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta})
 
 		return scannedCounter, err
 	default:
@@ -106,8 +163,8 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 		RETURNING id, mtype, delta
 		`
 
-	ctx, cancel := context.WithTimeout(pg.ctx, time.Second*120) //120 for for debug
-	defer cancel()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ctxCancel()
 
 	tx, err := pg.database.Begin()
 	if err != nil {
@@ -129,7 +186,10 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 		switch metric.MType {
 		case "gauge":
 			var scannedGauge metrics.Metrics
-			err := stmtGauge.QueryRowContext(ctx, metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+			err := RetryQueryWithStmt(ctx, stmtGauge,
+				[]any{metric.ID, metric.Value},
+				[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
+			// err := stmtGauge.QueryRowContext(ctx, metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 
 			result = append(result, scannedGauge)
 			if err != nil {
@@ -138,7 +198,10 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 
 		case "counter":
 			var scannedCounter metrics.Metrics
-			err := stmtCounter.QueryRowContext(ctx, metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+			err := RetryQueryWithStmt(ctx, stmtCounter,
+				[]any{metric.ID, metric.Delta},
+				[]any{&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta})
+			// err := stmtCounter.QueryRowContext(ctx, metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
 			result = append(result, scannedCounter)
 			if err != nil {
@@ -165,10 +228,17 @@ func (pg *PgStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, b
 		FROM metrics WHERE id = $1
 		`
 
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ctxCancel()
+
 	ok := true
 	result := metrics.Metrics{}
-	err := pg.database.QueryRowContext(pg.ctx, queryGetMetric,
-		metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
+	err := RetryQueryRow(ctx, pg.database, queryGetMetric,
+		[]any{metric.ID},
+		[]any{&result.ID, &result.MType, &result.Delta, &result.Value})
+
+	// err := pg.database.QueryRowContext(ctx, queryGetMetric,
+	// 	metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
 	if err != nil {
 		ok = false
 	}
@@ -181,7 +251,13 @@ func (pg *PgStorage) GetMetrics() map[string]any {
 		SELECT id, mtype, delta, value 
 		FROM metrics
 		`
-	rows, err := pg.database.QueryContext(pg.ctx, queryGetMetrics)
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer ctxCancel()
+
+	rows, err := RetryQuery(ctx, pg.database, queryGetMetrics)
+
+	// rows, err := pg.database.QueryContext(ctx, queryGetMetrics)
 	if err != nil {
 		pg.logger.Warnw("get_metrics error")
 	}
@@ -193,8 +269,6 @@ func (pg *PgStorage) GetMetrics() map[string]any {
 		if err != nil {
 			pg.logger.Warnw("got error when reading metric")
 		}
-
-		// allMetrics = append(allMetrics, metric)
 
 		switch metric.MType {
 		case "gauge":
@@ -221,8 +295,8 @@ func (pg *PgStorage) GetMetrics() map[string]any {
 }
 
 func (pg *PgStorage) Shutdown() error {
-	pg.logger.Infow("Backing up storage before shutdown")
-	pg.ctxCancel()
+	pg.logger.Infow("Closing database connection")
+	// pg.ctxCancel()
 	pg.database.Close()
 	return nil
 }

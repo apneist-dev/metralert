@@ -340,7 +340,7 @@ func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *ht
 
 	resultMetrics, err := server.storage.UpdateBatchMetrics(metrics)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
