@@ -18,34 +18,20 @@ type PgStorage struct {
 	// ctxCancel context.CancelFunc
 }
 
-func RetryQueryRow(ctx context.Context, db *sql.DB, query string, args []any, scans []any) error {
+func Retry(ctx context.Context, fn func(ctx context.Context) error) error {
 	var errs []error
-
+	var err error
 	for i := range 3 {
-		err := db.QueryRowContext(ctx, query, args...).Scan(scans...)
+		err = fn(ctx)
 		if err == nil {
 			return nil
 		}
+
 		errs = append(errs, err)
 		delay := (i*2 + 1)
 		time.Sleep(time.Duration(delay) * time.Second)
 	}
-	return errors.Join(errs...)
-}
-
-func RetryQueryWithStmt(ctx context.Context, stmt *sql.Stmt, args []any, scans []any) error {
-	var errs []error
-
-	for i := range 3 {
-		err := stmt.QueryRowContext(ctx, args...).Scan(scans...)
-		if err == nil {
-			return nil
-		}
-		errs = append(errs, err)
-		delay := (i*2 + 1)
-		time.Sleep(time.Duration(delay) * time.Second)
-	}
-	return errors.Join(errs...)
+	return fmt.Errorf("failed after 3 retries %s", errs)
 }
 
 func RetryQuery(ctx context.Context, db *sql.DB, query string) (*sql.Rows, error) {
@@ -93,7 +79,7 @@ func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage 
 	return &pg
 }
 
-func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error) {
+func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics) (metrics.Metrics, error) {
 	queryUpdateGauge := `
 		INSERT INTO metrics (id, mtype, value)
     	VALUES ( $1 , 'gauge', $2 )
@@ -110,7 +96,7 @@ func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		RETURNING id, mtype, delta
 		`
 
-	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, ctxCancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer ctxCancel()
 
 	switch metric.MType {
@@ -119,10 +105,13 @@ func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		// err := pg.database.QueryRowContext(ctx, queryUpdateGauge,
 		// 	metric.ID,
 		// 	metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
-
-		err := RetryQueryRow(ctx, pg.database, queryUpdateGauge,
-			[]any{metric.ID, metric.Value},
-			[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
+		err := Retry(ctx, func(ctx context.Context) error {
+			return pg.database.QueryRowContext(ctx, queryUpdateGauge,
+				metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+		})
+		// err := RetryQueryRow(ctx, pg.database, queryUpdateGauge,
+		// 	[]any{metric.ID, metric.Value},
+		// 	[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
 
 		return scannedGauge, err
 
@@ -132,9 +121,10 @@ func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 		// 	metric.ID,
 		// 	metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
-		err := RetryQueryRow(ctx, pg.database, queryUpdateCounter,
-			[]any{metric.ID, metric.Delta},
-			[]any{&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta})
+		err := Retry(ctx, func(ctx context.Context) error {
+			return pg.database.QueryRowContext(ctx, queryUpdateCounter,
+				metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+		})
 
 		return scannedCounter, err
 	default:
@@ -143,7 +133,7 @@ func (pg *PgStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 	}
 }
 
-func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
+func (pg *PgStorage) UpdateBatchMetrics(reqCtx context.Context, metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
 	var result []metrics.Metrics
 	var errs []error
 
@@ -163,7 +153,7 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 		RETURNING id, mtype, delta
 		`
 
-	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, ctxCancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer ctxCancel()
 
 	tx, err := pg.database.Begin()
@@ -186,9 +176,10 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 		switch metric.MType {
 		case "gauge":
 			var scannedGauge metrics.Metrics
-			err := RetryQueryWithStmt(ctx, stmtGauge,
-				[]any{metric.ID, metric.Value},
-				[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
+			err := Retry(ctx, func(ctx context.Context) error {
+				return stmtGauge.QueryRowContext(ctx,
+					metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
+			})
 			// err := stmtGauge.QueryRowContext(ctx, metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 
 			result = append(result, scannedGauge)
@@ -198,9 +189,10 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 
 		case "counter":
 			var scannedCounter metrics.Metrics
-			err := RetryQueryWithStmt(ctx, stmtCounter,
-				[]any{metric.ID, metric.Delta},
-				[]any{&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta})
+			err := Retry(ctx, func(ctx context.Context) error {
+				return stmtCounter.QueryRowContext(ctx,
+					metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
+			})
 			// err := stmtCounter.QueryRowContext(ctx, metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
 			result = append(result, scannedCounter)
@@ -222,20 +214,21 @@ func (pg *PgStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 	return result, errors.Join(errs...)
 }
 
-func (pg *PgStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool) {
+func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metrics) (metrics.Metrics, bool) {
 	queryGetMetric := `
 		SELECT id, mtype, delta, value 
 		FROM metrics WHERE id = $1
 		`
 
-	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, ctxCancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer ctxCancel()
 
 	ok := true
 	result := metrics.Metrics{}
-	err := RetryQueryRow(ctx, pg.database, queryGetMetric,
-		[]any{metric.ID},
-		[]any{&result.ID, &result.MType, &result.Delta, &result.Value})
+	err := Retry(ctx, func(ctx context.Context) error {
+		return pg.database.QueryRowContext(ctx, queryGetMetric,
+			metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
+	})
 
 	// err := pg.database.QueryRowContext(ctx, queryGetMetric,
 	// 	metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
@@ -245,14 +238,14 @@ func (pg *PgStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, b
 	return result, ok
 }
 
-func (pg *PgStorage) GetMetrics() map[string]any {
+func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) {
 	result := make(map[string]any)
 	queryGetMetrics := `
 		SELECT id, mtype, delta, value 
 		FROM metrics
 		`
 
-	ctx, ctxCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, ctxCancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer ctxCancel()
 
 	rows, err := RetryQuery(ctx, pg.database, queryGetMetrics)
@@ -260,6 +253,7 @@ func (pg *PgStorage) GetMetrics() map[string]any {
 	// rows, err := pg.database.QueryContext(ctx, queryGetMetrics)
 	if err != nil {
 		pg.logger.Warnw("get_metrics error")
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -289,9 +283,10 @@ func (pg *PgStorage) GetMetrics() map[string]any {
 	err = rows.Err()
 	if err != nil {
 		pg.logger.Warnw("get_metrics error")
+		return nil, err
 	}
 
-	return result
+	return result, nil
 }
 
 func (pg *PgStorage) Shutdown() error {
@@ -301,12 +296,12 @@ func (pg *PgStorage) Shutdown() error {
 	return nil
 }
 
-func (pg *PgStorage) PingDatabase() error {
+func (pg *PgStorage) PingDatabase(reqCtx context.Context) error {
 	if pg.database == nil {
 		return errors.New("no database connected")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(reqCtx, 1*time.Second)
 	defer cancel()
 	if err := pg.database.PingContext(ctx); err != nil {
 		return err

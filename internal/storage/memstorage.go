@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +72,7 @@ func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
 	return err
 }
 
-func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error) {
+func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (metrics.Metrics, error) {
 	var emptyMetric metrics.Metrics
 	err := m.validateMetric(metric)
 	if err != nil {
@@ -106,7 +107,7 @@ func (m *MemStorage) UpdateMetric(metric metrics.Metrics) (metrics.Metrics, erro
 	return m.db[metric.ID], err
 }
 
-func (m *MemStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
+func (m *MemStorage) UpdateBatchMetrics(_ context.Context, metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
 	var result []metrics.Metrics
 	var errs []error
 
@@ -143,13 +144,13 @@ func (m *MemStorage) UpdateBatchMetrics(metricsSlice []metrics.Metrics) ([]metri
 	return result, errors.Join(errs...)
 }
 
-func (m *MemStorage) GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool) {
+func (m *MemStorage) GetMetricByName(_ context.Context, metric metrics.Metrics) (metrics.Metrics, bool) {
 	// case in-memory
 	result, ok := m.db[metric.ID]
 	return result, ok
 }
 
-func (m *MemStorage) GetMetrics() map[string]any {
+func (m *MemStorage) GetMetrics(_ context.Context) (map[string]any, error) {
 	// case in-memory
 	result := make(map[string]any)
 	for id, metric := range m.db {
@@ -160,7 +161,7 @@ func (m *MemStorage) GetMetrics() map[string]any {
 			result[id] = fmt.Sprintf("%d", *metric.Delta)
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (m *MemStorage) SaveDatabase() error {
@@ -205,6 +206,6 @@ func (m *MemStorage) Shutdown() error {
 	return nil
 }
 
-func (m *MemStorage) PingDatabase() error {
+func (m *MemStorage) PingDatabase(_ context.Context) error {
 	return errors.New("no database connected")
 }

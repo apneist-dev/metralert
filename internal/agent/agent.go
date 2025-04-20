@@ -188,21 +188,21 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 
 // Отправка всех метрик
 func (a *Agent) SendAllMetrics() error {
+	a.logger.Infow("Waiting for server")
+	for {
+		resp, err := a.client.Get(a.BaseURL)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		break
+	}
+	a.logger.Infow("Server is reachable")
 	for {
 		a.mutex.Lock()
 		memoryStatisticsCopy := make([]metrics.Metrics, len(a.memoryStatistics))
 		copy(memoryStatisticsCopy, a.memoryStatistics)
 		a.mutex.Unlock()
-		// a.logger.Infow("Waiting for server")
-		for {
-			resp, err := a.client.Get(a.BaseURL)
-			if err != nil {
-				continue
-			}
-			resp.Body.Close()
-			break
-		}
-		// a.logger.Infow("Server is reachable")
 		// batch mode
 		if a.batch {
 			endpoint := a.BaseURL + batchUpdatePath
