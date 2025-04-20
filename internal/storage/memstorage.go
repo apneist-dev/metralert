@@ -55,10 +55,6 @@ func NewMemstorage(fileStoragePath string, recover bool, logger *zap.SugaredLogg
 
 func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
 	var err error
-	// currentMetric, ok := m.db[metric.ID]
-	// if ok && currentMetric.MType != metric.MType {
-	// 	return fmt.Errorf("metric %s exists with another type %s", metric.ID, m.db[metric.ID].MType)
-	// }
 	switch metric.MType {
 	case "gauge":
 		if metric.Value == nil {

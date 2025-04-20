@@ -14,8 +14,6 @@ import (
 type PgStorage struct {
 	database *sql.DB
 	logger   *zap.SugaredLogger
-	// ctx       context.Context
-	// ctxCancel context.CancelFunc
 }
 
 func Retry(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -102,24 +100,15 @@ func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics
 	switch metric.MType {
 	case "gauge":
 		var scannedGauge metrics.Metrics
-		// err := pg.database.QueryRowContext(ctx, queryUpdateGauge,
-		// 	metric.ID,
-		// 	metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 		err := Retry(ctx, func(ctx context.Context) error {
 			return pg.database.QueryRowContext(ctx, queryUpdateGauge,
 				metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 		})
-		// err := RetryQueryRow(ctx, pg.database, queryUpdateGauge,
-		// 	[]any{metric.ID, metric.Value},
-		// 	[]any{&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value})
 
 		return scannedGauge, err
 
 	case "counter":
 		var scannedCounter metrics.Metrics
-		// err := pg.database.QueryRowContext(ctx, queryUpdateCounter,
-		// 	metric.ID,
-		// 	metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
 		err := Retry(ctx, func(ctx context.Context) error {
 			return pg.database.QueryRowContext(ctx, queryUpdateCounter,
@@ -180,7 +169,6 @@ func (pg *PgStorage) UpdateBatchMetrics(reqCtx context.Context, metricsSlice []m
 				return stmtGauge.QueryRowContext(ctx,
 					metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 			})
-			// err := stmtGauge.QueryRowContext(ctx, metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 
 			result = append(result, scannedGauge)
 			if err != nil {
@@ -193,7 +181,6 @@ func (pg *PgStorage) UpdateBatchMetrics(reqCtx context.Context, metricsSlice []m
 				return stmtCounter.QueryRowContext(ctx,
 					metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 			})
-			// err := stmtCounter.QueryRowContext(ctx, metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 
 			result = append(result, scannedCounter)
 			if err != nil {
@@ -230,8 +217,6 @@ func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metr
 			metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
 	})
 
-	// err := pg.database.QueryRowContext(ctx, queryGetMetric,
-	// 	metric.ID).Scan(&result.ID, &result.MType, &result.Delta, &result.Value)
 	if err != nil {
 		ok = false
 	}
@@ -250,7 +235,6 @@ func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) 
 
 	rows, err := RetryQuery(ctx, pg.database, queryGetMetrics)
 
-	// rows, err := pg.database.QueryContext(ctx, queryGetMetrics)
 	if err != nil {
 		pg.logger.Warnw("get_metrics error")
 		return nil, err
