@@ -224,6 +224,12 @@ func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) 
 		if err != nil {
 			return err
 		}
+
+		err = rows.Err()
+		if err != nil {
+			pg.logger.Warnw("get_metrics error")
+			return err
+		}
 		return nil
 	})
 
@@ -254,12 +260,6 @@ func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) 
 			}
 			result[metric.ID] = fmt.Sprintf("%d", *metric.Delta)
 		}
-	}
-
-	err = rows.Err()
-	if err != nil {
-		pg.logger.Warnw("get_metrics error")
-		return nil, err
 	}
 
 	return result, nil
