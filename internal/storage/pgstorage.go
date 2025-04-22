@@ -32,22 +32,6 @@ func Retry(ctx context.Context, fn func(ctx context.Context) error) error {
 	return fmt.Errorf("failed after 3 retries %s", errs)
 }
 
-func RetryQuery(ctx context.Context, db *sql.DB, query string) (*sql.Rows, error) {
-	var errs []error
-	var rows *sql.Rows
-
-	for i := range 3 {
-		rows, err := db.QueryContext(ctx, query)
-		if err == nil {
-			return rows, nil
-		}
-		errs = append(errs, err)
-		delay := (i*2 + 1)
-		time.Sleep(time.Duration(delay) * time.Second)
-	}
-	return rows, errors.Join(errs...)
-}
-
 func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage {
 	pg := PgStorage{
 		logger: logger,
@@ -224,6 +208,7 @@ func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metr
 }
 
 func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) {
+	var rows *sql.Rows
 	result := make(map[string]any)
 	queryGetMetrics := `
 		SELECT id, mtype, delta, value 
@@ -233,7 +218,14 @@ func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) 
 	ctx, ctxCancel := context.WithTimeout(reqCtx, 3*time.Second)
 	defer ctxCancel()
 
-	rows, err := RetryQuery(ctx, pg.database, queryGetMetrics)
+	err := Retry(ctx, func(ctx context.Context) error {
+		var err error
+		rows, err = pg.database.QueryContext(ctx, queryGetMetrics)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 
 	if err != nil {
 		pg.logger.Warnw("get_metrics error")
