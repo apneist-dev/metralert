@@ -78,7 +78,7 @@ func TestAgent_SendPost(t *testing.T) {
 			}
 			logger, _ := zap.NewDevelopment()
 			sugar := logger.Sugar()
-			storage := storage.New("internal/storage/metrics_database.json", false, logger.Sugar())
+			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
 
 			server := server.New(tt.fields.serverurl, storage, sugar)
 			go server.Start()

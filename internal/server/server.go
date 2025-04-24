@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"metralert/internal/metrics"
+	"metralert/internal/storage"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,25 +23,20 @@ import (
 	"go.uber.org/zap"
 )
 
-type StorageInterface interface {
-	UpdateMetric(metric metrics.Metrics) (metrics.Metrics, error)
-	GetMetricByName(metric metrics.Metrics) (metrics.Metrics, bool)
-	GetMetrics() map[string]string
-}
-
 type Server struct {
-	storage    StorageInterface
+	storage    storage.StorageInterface
 	logger     *zap.SugaredLogger
 	HTTPServer *http.Server
 	Router     *chi.Mux
 }
 
-func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Server {
+func New(address string, repo storage.StorageInterface, logger *zap.SugaredLogger) *Server {
 	s := &Server{}
 	s.Router = chi.NewRouter()
 	s.Router.Use(s.loggingMiddleware)
 
 	s.Router.Use(middleware.Compress(5, "application/json", "text/html"))
+	s.Router.Get("/ping", s.DatabasePinger)
 	s.Router.Route("/update", func(router chi.Router) {
 		router.Post("/{metrictype}/{metricname}/{metricvalue}", s.UpdateHandler)
 		router.Post("/", s.UpdateMetricJSONHandler)
@@ -50,6 +46,7 @@ func New(address string, repo StorageInterface, logger *zap.SugaredLogger) *Serv
 		router.Get("/{metrictype}/{metricname}", s.GetMetricHandler)
 		router.Post("/", s.ReadMetricJSONHandler)
 	})
+	s.Router.Post("/updates/", s.UpdateBatchMetricsJSONHandler)
 
 	s.storage = repo
 	s.logger = logger
@@ -135,6 +132,12 @@ func (server *Server) loggingMiddleware(next http.Handler) http.Handler {
 // Обработчик для вывод всех метрик в html страницу
 func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 
+	allMetrics, err := server.storage.GetMetrics(r.Context())
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
 	tmpl, err := template.ParseFiles("internal/server/templates/mainpage.html")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -143,7 +146,7 @@ func (server *Server) GetMainHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	tmpl.Execute(w, server.storage.GetMetrics())
+	tmpl.Execute(w, allMetrics)
 }
 
 func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +158,7 @@ func (server *Server) GetMetricHandler(w http.ResponseWriter, r *http.Request) {
 		MType: metrictype,
 	}
 
-	storageMetric, ok := server.storage.GetMetricByName(metric)
+	storageMetric, ok := server.storage.GetMetricByName(r.Context(), metric)
 	if !ok {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -195,7 +198,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metric.Delta = &metricvalueInt64
-		resultMetric, err = server.storage.UpdateMetric(metric)
+		resultMetric, err = server.storage.UpdateMetric(r.Context(), metric)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
@@ -209,7 +212,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		metric.Value = &metricvalueFloat64
-		resultMetric, err = server.storage.UpdateMetric(metric)
+		resultMetric, err = server.storage.UpdateMetric(r.Context(), metric)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
@@ -237,7 +240,7 @@ func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	storageMetric, ok := server.storage.GetMetricByName(metric)
+	storageMetric, ok := server.storage.GetMetricByName(r.Context(), metric)
 	if !ok {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -293,7 +296,7 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resultMetric, err := server.storage.UpdateMetric(metric)
+	resultMetric, err := server.storage.UpdateMetric(r.Context(), metric)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
@@ -308,4 +311,56 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+}
+
+func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
+	var metrics []metrics.Metrics
+	var buf bytes.Buffer
+
+	_, err := buf.ReadFrom(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	body := buf.Bytes()
+
+	if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+		body, err = gzipDecompress(buf.Bytes())
+		if err != nil {
+			server.logger.Infow("Unable to decompress body")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+
+	if err = json.Unmarshal(body, &metrics); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metrics)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := json.Marshal(resultMetrics)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
+func (server *Server) DatabasePinger(w http.ResponseWriter, r *http.Request) {
+	err := server.storage.PingDatabase(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "database is accessed\n")
 }

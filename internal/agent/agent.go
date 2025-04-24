@@ -16,11 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"go.uber.org/zap"
 )
 
 const (
-	updatePath = "/update/"
+	updatePath      = "/update/"
+	batchUpdatePath = "/updates/"
 )
 
 type Agent struct {
@@ -33,10 +35,11 @@ type Agent struct {
 	rtm              runtime.MemStats
 	client           http.Client
 	logger           *zap.SugaredLogger
+	batch            bool
 }
 
 // Конструктор агента
-func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger) *Agent {
+func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger, batch bool) *Agent {
 	if !strings.Contains(address, "http") {
 		address = "http://" + address
 	}
@@ -47,6 +50,17 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 	transport := &http.Transport{
 		DisableCompression: false,
 	}
+
+	retryClient := *retryablehttp.NewClient()
+	retryClient.HTTPClient.Transport = transport
+	retryClient.RetryMax = 3
+	retryClient.RetryWaitMin = 1
+	retryClient.RetryWaitMax = 5
+	retryClient.Backoff = retryablehttp.LinearJitterBackoff
+	retryClient.Logger = nil
+
+	standardClient := *retryClient.StandardClient()
+
 	return &Agent{
 		BaseURL:          destinationAddress.String(),
 		pollInterval:     pollInterval,
@@ -55,11 +69,9 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 		mutex:            sync.Mutex{},
 		memoryStatistics: []metrics.Metrics{},
 		rtm:              runtime.MemStats{},
-		client: http.Client{
-			Timeout:   3 * time.Second,
-			Transport: transport,
-		},
-		logger: logger,
+		client:           standardClient,
+		logger:           logger,
+		batch:            batch,
 	}
 }
 
@@ -176,32 +188,67 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 
 // Отправка всех метрик
 func (a *Agent) SendAllMetrics() error {
+	a.logger.Infow("Waiting for server")
+	for {
+		resp, err := a.client.Get(a.BaseURL)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		break
+	}
+	a.logger.Infow("Server is reachable")
 	for {
 		a.mutex.Lock()
 		memoryStatisticsCopy := make([]metrics.Metrics, len(a.memoryStatistics))
 		copy(memoryStatisticsCopy, a.memoryStatistics)
 		a.mutex.Unlock()
-		a.logger.Infow("Waiting for server")
-		for {
-			resp, err := a.client.Get(a.BaseURL)
-			if err != nil {
+		// batch mode
+		if a.batch {
+			endpoint := a.BaseURL + batchUpdatePath
+			if len(memoryStatisticsCopy) == 0 {
 				continue
 			}
-			resp.Body.Close()
-			break
+			jsonData, err := json.Marshal(memoryStatisticsCopy)
+			if err != nil {
+				a.logger.Fatalw("unable to marshal []metric")
+			}
+
+			compressedBody, err := gzipCompress(jsonData)
+			if err != nil {
+				a.logger.Fatalw("Unable to compress body")
+			}
+
+			req, err := http.NewRequest("POST", endpoint, compressedBody)
+			if err != nil {
+				a.logger.Fatalw("Unable to form request")
+			}
+
+			req.Header.Set("Content-Encoding", "gzip")
+			req.Header.Add("Content-Type", "application/json")
+
+			resp, err := a.client.Do(req)
+			if err != nil {
+				return err
+			}
+			a.logger.Infow("Batch Metrics sent successfully")
+			defer resp.Body.Close()
 		}
-		a.logger.Infow("Server is reachable")
-		for _, s := range memoryStatisticsCopy {
-			resp, err := a.SendPost(s)
-			if err != nil {
-				log.Printf("При отправке метрик произошла ошибка: %v", err)
-				continue
+
+		// single metric mode
+		if !a.batch {
+			for _, s := range memoryStatisticsCopy {
+				resp, err := a.SendPost(s)
+				if err != nil {
+					log.Printf("При отправке метрик произошла ошибка: %v", err)
+					continue
+				}
+				a.logger.Infow("Response received",
+					"status", resp.StatusCode,
+					"Content-Type", resp.Header.Get("Content-Type"),
+					"Content-Encoding", resp.Header.Get("Content-Encoding"))
+				resp.Body.Close()
 			}
-			a.logger.Infow("Response received",
-				"status", resp.StatusCode,
-				"Content-Type", resp.Header.Get("Content-Type"),
-				"Content-Encoding", resp.Header.Get("Content-Encoding"))
-			resp.Body.Close()
 		}
 		time.Sleep(time.Duration(a.reportInterval) * time.Second)
 	}
