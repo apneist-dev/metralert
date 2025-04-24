@@ -33,10 +33,11 @@ func main() {
 		"cfg.Restore", cfg.Restore,
 		"cfg.FileStoragePath", cfg.FileStoragePath,
 		"cfg.DatabaseAddress", cfg.DatabaseAddress,
-		"cfg.StoreInterval", cfg.StoreInterval)
+		"cfg.StoreInterval", cfg.StoreInterval,
+		"cfg.HashKey", cfg.HashKey)
 
 	go storage.BackupService(cfg.StoreInterval)
-	server := server.New(cfg.ServerAddress, storage, sugar)
+	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar)
 	go server.Start()
 
 	<-shutdownCh

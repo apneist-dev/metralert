@@ -80,7 +80,7 @@ func TestAgent_SendPost(t *testing.T) {
 			sugar := logger.Sugar()
 			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
 
-			server := server.New(tt.fields.serverurl, storage, sugar)
+			server := server.New(tt.fields.serverurl, storage, "", sugar)
 			go server.Start()
 			time.Sleep(time.Second * 3)
 

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -28,12 +31,13 @@ type Server struct {
 	logger     *zap.SugaredLogger
 	HTTPServer *http.Server
 	Router     *chi.Mux
+	hashKey    string
 }
 
-func New(address string, repo storage.StorageInterface, logger *zap.SugaredLogger) *Server {
+func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger) *Server {
 	s := &Server{}
 	s.Router = chi.NewRouter()
-	s.Router.Use(s.loggingMiddleware)
+	s.Router.Use(s.loggingMiddleware, s.verifyHashMiddleware, s.hashMiddleware)
 
 	s.Router.Use(middleware.Compress(5, "application/json", "text/html"))
 	s.Router.Get("/ping", s.DatabasePinger)
@@ -50,6 +54,7 @@ func New(address string, repo storage.StorageInterface, logger *zap.SugaredLogge
 
 	s.storage = repo
 	s.logger = logger
+	s.hashKey = hashKey
 
 	s.HTTPServer = &http.Server{
 		Addr:    address,
@@ -125,6 +130,74 @@ func (server *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"ResponseSize", response.size,
 			"ResponseStatus", response.status,
 		)
+	}
+	return http.HandlerFunc(logFn)
+}
+
+func (server *Server) verifyHashMiddleware(next http.Handler) http.Handler {
+	logFn := func(w http.ResponseWriter, r *http.Request) {
+
+		receivedHash := r.Header.Get("Hashsha256")
+		if receivedHash == "" && server.hashKey != "" {
+			http.Error(w, "Hassha256 is required", http.StatusBadRequest)
+			return
+		}
+
+		if server.hashKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Читаем тело запроса
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		// Восстанавливаем тело
+		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		// Вычисляем хеш
+		h := hmac.New(sha256.New, []byte(server.hashKey))
+		h.Write(body)
+		calculatedHash := hex.EncodeToString(h.Sum(nil))
+
+		// Сравниваем хеши
+		if calculatedHash != receivedHash {
+			http.Error(w, "Invalid body hash", http.StatusBadRequest)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(logFn)
+}
+
+func (server *Server) hashMiddleware(next http.Handler) http.Handler {
+	logFn := func(w http.ResponseWriter, r *http.Request) {
+
+		// Читаем тело запроса
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		// Восстанавливаем тело
+		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		// Вычисляем хеш
+		h := hmac.New(sha256.New, []byte(server.hashKey))
+		h.Write(body)
+		calculatedHash := hex.EncodeToString(h.Sum(nil))
+
+		// Пишем хеш
+		w.Header().Set("Hashsha256", calculatedHash)
+
+		next.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(logFn)
 }

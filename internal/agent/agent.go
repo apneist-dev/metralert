@@ -3,6 +3,9 @@ package agent
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -36,10 +39,11 @@ type Agent struct {
 	client           http.Client
 	logger           *zap.SugaredLogger
 	batch            bool
+	hashKey          string
 }
 
 // Конструктор агента
-func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger, batch bool) *Agent {
+func New(address string, pollInterval int, reportInterval int, hashKey string, logger *zap.SugaredLogger, batch bool) *Agent {
 	if !strings.Contains(address, "http") {
 		address = "http://" + address
 	}
@@ -72,6 +76,7 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 		client:           standardClient,
 		logger:           logger,
 		batch:            batch,
+		hashKey:          hashKey,
 	}
 }
 
@@ -139,7 +144,7 @@ func (a *Agent) CollectMetric() {
 	}
 }
 
-func gzipCompress(body []byte) (io.Reader, error) {
+func gzipCompress(body []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 
@@ -152,7 +157,7 @@ func gzipCompress(body []byte) (io.Reader, error) {
 	if err1 != nil {
 		return nil, err1
 	}
-	return &buf, nil
+	return buf.Bytes(), nil
 }
 
 // Отправка одного запроса Post
@@ -169,13 +174,26 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 		a.logger.Fatalw("Unable to compress body")
 	}
 
-	req, err := http.NewRequest("POST", endpoint, compressedBody)
+	compressedBodyReader := bytes.NewReader(compressedBody)
+
+	req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
 	if err != nil {
 		a.logger.Fatalw("Unable to form request")
 	}
 
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Add("Content-Type", "application/json")
+
+	if a.hashKey != "" {
+		buf, err := io.ReadAll(bytes.NewReader(compressedBody))
+		if err != nil {
+			a.logger.Warnf("read body error: %w", err)
+		}
+
+		h := hmac.New(sha256.New, []byte(a.hashKey))
+		h.Write(buf)
+		req.Header.Add("HashSHA256", hex.EncodeToString(h.Sum(nil)))
+	}
 
 	resp, err := a.client.Do(req)
 	if err != nil {
@@ -219,13 +237,26 @@ func (a *Agent) SendAllMetrics() error {
 				a.logger.Fatalw("Unable to compress body")
 			}
 
-			req, err := http.NewRequest("POST", endpoint, compressedBody)
+			compressedBodyReader := bytes.NewReader(compressedBody)
+
+			req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
 			if err != nil {
 				a.logger.Fatalw("Unable to form request")
 			}
 
 			req.Header.Set("Content-Encoding", "gzip")
 			req.Header.Add("Content-Type", "application/json")
+
+			if a.hashKey != "" {
+				buf, err := io.ReadAll(bytes.NewReader(compressedBody))
+				if err != nil {
+					a.logger.Warnf("read body error: %w", err)
+				}
+
+				h := hmac.New(sha256.New, []byte(a.hashKey))
+				h.Write(buf)
+				req.Header.Add("HashSHA256", hex.EncodeToString(h.Sum(nil)))
+			}
 
 			resp, err := a.client.Do(req)
 			if err != nil {

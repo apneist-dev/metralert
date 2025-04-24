@@ -11,6 +11,7 @@ type Config struct {
 	ServerAddress  string `env:"ADDRESS"`
 	ReportInterval int    `env:"REPORT_INTERVAL"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
+	HashKey        string `env:"KEY"`
 }
 
 func (cfg *Config) GetConfig() {
@@ -29,6 +30,10 @@ func (cfg *Config) GetConfig() {
 
 	if cfg.PollInterval == 0 {
 		flag.IntVar(&cfg.PollInterval, "p", 2, "pollInterval")
+	}
+
+	if cfg.HashKey == "" {
+		flag.StringVar(&cfg.HashKey, "k", "", "hash key")
 	}
 
 	flag.Parse()
