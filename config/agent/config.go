@@ -34,6 +34,8 @@ func (cfg *Config) GetConfig() {
 
 	if cfg.HashKey == "" {
 		flag.StringVar(&cfg.HashKey, "k", "", "hash key")
+	} else {
+		flag.String("k", "", "hash key")
 	}
 
 	flag.Parse()
