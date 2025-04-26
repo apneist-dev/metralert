@@ -137,13 +137,11 @@ func (server *Server) loggingMiddleware(next http.Handler) http.Handler {
 func (server *Server) verifyHashMiddleware(next http.Handler) http.Handler {
 	logFn := func(w http.ResponseWriter, r *http.Request) {
 
-		receivedHash := r.Header.Get("Hashsha256")
-		if receivedHash == "" && server.hashKey != "" {
-			http.Error(w, "Hassha256 is required", http.StatusBadRequest)
-			return
-		}
+		receivedHash := r.Header.Get("Hash")
+		server.logger.Info("Headers ", r.Header)
+		server.logger.Info("Received hash ", receivedHash)
 
-		if server.hashKey == "" {
+		if server.hashKey == "" || receivedHash == "" || receivedHash == "none" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -163,7 +161,7 @@ func (server *Server) verifyHashMiddleware(next http.Handler) http.Handler {
 		h := hmac.New(sha256.New, []byte(server.hashKey))
 		h.Write(body)
 		calculatedHash := hex.EncodeToString(h.Sum(nil))
-
+		server.logger.Info("Calculated hash ", calculatedHash)
 		// Сравниваем хеши
 		if calculatedHash != receivedHash {
 			http.Error(w, "Invalid body hash", http.StatusBadRequest)
@@ -302,6 +300,7 @@ func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Reque
 	var metric metrics.Metrics
 	var buf bytes.Buffer
 
+	w.Header().Set("Content-Type", "application/json")
 	_, err := buf.ReadFrom(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -325,7 +324,6 @@ func (server *Server) ReadMetricJSONHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }

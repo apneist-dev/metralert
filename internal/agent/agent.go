@@ -193,6 +193,7 @@ func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
 		h := hmac.New(sha256.New, []byte(a.hashKey))
 		h.Write(buf)
 		req.Header.Add("HashSHA256", hex.EncodeToString(h.Sum(nil)))
+		a.logger.Infof("Hash is", hex.EncodeToString(h.Sum(nil)))
 	}
 
 	resp, err := a.client.Do(req)
