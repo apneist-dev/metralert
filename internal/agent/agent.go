@@ -214,51 +214,7 @@ func gzipCompress(body []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Отправка одного запроса Post
-func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
-	endpoint := a.BaseURL + updatePath
-	jsonData, err := json.Marshal(metric)
-	if err != nil {
-		log.Println("Unable to Marshal metric")
-		return nil, err
-	}
-
-	compressedBody, err := gzipCompress(jsonData)
-	if err != nil {
-		a.logger.Fatalw("Unable to compress body")
-	}
-
-	compressedBodyReader := bytes.NewReader(compressedBody)
-
-	req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
-	if err != nil {
-		a.logger.Fatalw("Unable to form request")
-	}
-
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json")
-
-	if a.hashKey != "" {
-		buf, err := io.ReadAll(bytes.NewReader(compressedBody))
-		if err != nil {
-			a.logger.Warnf("read body error: %w", err)
-		}
-
-		h := hmac.New(sha256.New, []byte(a.hashKey))
-		h.Write(buf)
-		req.Header.Add("Hash", hex.EncodeToString(h.Sum(nil)))
-		a.logger.Infof("Hash is", hex.EncodeToString(h.Sum(nil)))
-	}
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return resp, err
-	}
-	defer resp.Body.Close()
-
-	return resp, nil
-}
-
+// Воркеры
 func (a *Agent) SendPostWorker(id int, jobs chan metrics.Metrics, results chan struct {
 	response *http.Response
 	err      error
@@ -309,12 +265,13 @@ func (a *Agent) SendPostWorker(id int, jobs chan metrics.Metrics, results chan s
 				err      error
 			}{resp, err}
 		}
-		defer resp.Body.Close()
 
 		results <- struct {
 			response *http.Response
 			err      error
 		}{resp, err}
+
+		resp.Body.Close()
 	}
 }
 
