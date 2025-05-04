@@ -22,12 +22,13 @@ func main() {
 	log.Printf(`Запущен агент:
 		ServerAddress %s,
 		PollInterval: %d,
-		ReportInterval: %d`,
-		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval)
+		ReportInterval: %d,
+		RateLimit: %d`,
+		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 
-	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true)
-	go metricsAgent.CollectMetric()
-	go metricsAgent.SendAllMetrics()
+	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, false)
+	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
+	go metricsAgent.SendAllMetrics(metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
 
 	select {}
 }
