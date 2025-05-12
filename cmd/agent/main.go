@@ -4,11 +4,22 @@ import (
 	"log"
 	agentconfig "metralert/config/agent"
 	"metralert/internal/agent"
+	"os"
+	"os/signal"
+	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/net/context"
 )
 
 func main() {
+
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, os.Interrupt)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	cfg := agentconfig.Config{}
 	cfg.GetConfig()
 
@@ -28,7 +39,10 @@ func main() {
 
 	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, false)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
-	go metricsAgent.SendAllMetrics(metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
+	go metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
 
-	select {}
+	<-shutdownCh
+	cancel()
+	sugar.Infow("Shutting down agent")
+	time.Sleep(3 * time.Second)
 }
