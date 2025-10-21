@@ -27,5 +27,6 @@ vendor/
 # Local files for testing
 file.txt
 metrics_database.json
+auditlog.json
 /bruno
 /autotests

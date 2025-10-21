@@ -15,6 +15,8 @@ type Config struct {
 	Restore         bool   `env:"RESTORE"`
 	DatabaseAddress string `env:"DATABASE_DSN"`
 	HashKey         string `env:"KEY"`
+	AuditFile       string `env:"AUDIT_FILE"`
+	AuditURL        string `env:"AUDIT_URL"`
 }
 
 func (cfg *Config) GetConfig() {
@@ -55,6 +57,18 @@ func (cfg *Config) GetConfig() {
 		flag.StringVar(&cfg.HashKey, "k", "", "hash key")
 	} else {
 		flag.String("k", "", "hash key")
+	}
+
+	if cfg.AuditFile == "" {
+		flag.StringVar(&cfg.AuditFile, "audit-file", "", "path of a file to store audit logs")
+	} else {
+		flag.String("audit-file", "", "path of a file to store audit logs")
+	}
+
+	if cfg.AuditURL == "" {
+		flag.StringVar(&cfg.AuditURL, "audit-url", "", "path of a file to store audit logs")
+	} else {
+		flag.String("audit-url", "", "URL to store audit logs")
 	}
 
 	flag.Parse()

@@ -12,6 +12,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ type Server struct {
 	HTTPServer *http.Server
 	Router     *chi.Mux
 	hashKey    string
+	AuditCh    chan []string
 }
 
 func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger) *Server {
@@ -60,6 +62,7 @@ func New(address string, repo storage.StorageInterface, hashKey string, logger *
 		Addr:    address,
 		Handler: s.Router,
 	}
+	s.AuditCh = make(chan []string, 50)
 
 	return s
 }
@@ -408,6 +411,13 @@ func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	metricNames := make([]string, 0)
+	for _, v := range metrics {
+		metricNames = append(metricNames, v.ID)
+	}
+
+	server.AuditCh <- metricNames
+
 	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metrics)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -434,4 +444,43 @@ func (server *Server) DatabasePinger(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "database is accessed\n")
+}
+
+func (server *Server) AuditLogger(auditFile string, auditURL string) {
+	var file *os.File
+	var err error
+	var auditEntry metrics.AuditMetrics
+
+	if auditFile != "" {
+		file, err = os.OpenFile(auditFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			server.logger.Errorln("Unable to open or create audit file")
+			return
+		}
+		server.logger.Infoln("Audit file created", auditFile)
+	}
+
+	if file != nil {
+		for {
+			metricNames := <-server.AuditCh
+			auditEntry = metrics.AuditMetrics{
+				TS:          time.Now().Unix(),
+				MetricNames: metricNames,
+				IP:          "localhost",
+			}
+			data, err := json.MarshalIndent(&auditEntry, "", "  ")
+			if err != nil {
+				server.logger.Errorln("Unable to write to audit file")
+				continue
+			}
+
+			_, err = file.Write(data)
+			_, err = file.Write([]byte(","))
+			if err != nil {
+				server.logger.Errorln("Unable to write to audit file")
+				continue
+			}
+			server.logger.Infoln(metricNames)
+		}
+	}
 }
