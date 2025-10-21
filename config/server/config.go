@@ -14,6 +14,7 @@ type Config struct {
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 	Restore         bool   `env:"RESTORE"`
 	DatabaseAddress string `env:"DATABASE_DSN"`
+	HashKey         string `env:"KEY"`
 }
 
 func (cfg *Config) GetConfig() {
@@ -48,6 +49,12 @@ func (cfg *Config) GetConfig() {
 	// "postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable"
 	if cfg.DatabaseAddress == "" {
 		flag.StringVar(&cfg.DatabaseAddress, "d", "", "database dsn")
+	}
+
+	if cfg.HashKey == "" {
+		flag.StringVar(&cfg.HashKey, "k", "", "hash key")
+	} else {
+		flag.String("k", "", "hash key")
 	}
 
 	flag.Parse()

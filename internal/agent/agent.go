@@ -3,14 +3,16 @@ package agent
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
-	"math/rand/v2"
 	"metralert/internal/metrics"
 	"net/http"
 	"net/url"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 const (
 	updatePath      = "/update/"
 	batchUpdatePath = "/updates/"
+	metricsMax      = 50
 )
 
 type Agent struct {
@@ -36,10 +39,16 @@ type Agent struct {
 	client           http.Client
 	logger           *zap.SugaredLogger
 	batch            bool
+	hashKey          string
+	WorkerChanIn     chan metrics.Metrics
+	WorkerChanOut    chan struct {
+		response *http.Response
+		err      error
+	}
 }
 
 // Конструктор агента
-func New(address string, pollInterval int, reportInterval int, logger *zap.SugaredLogger, batch bool) *Agent {
+func New(address string, pollInterval int, reportInterval int, hashKey string, logger *zap.SugaredLogger, batch bool) *Agent {
 	if !strings.Contains(address, "http") {
 		address = "http://" + address
 	}
@@ -61,6 +70,12 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 
 	standardClient := *retryClient.StandardClient()
 
+	workerChanIn := make(chan metrics.Metrics, metricsMax)
+	workerChanOut := make(chan struct {
+		response *http.Response
+		err      error
+	}, metricsMax)
+
 	return &Agent{
 		BaseURL:          destinationAddress.String(),
 		pollInterval:     pollInterval,
@@ -72,74 +87,19 @@ func New(address string, pollInterval int, reportInterval int, logger *zap.Sugar
 		client:           standardClient,
 		logger:           logger,
 		batch:            batch,
+		hashKey:          hashKey,
+		WorkerChanIn:     workerChanIn,
+		WorkerChanOut:    workerChanOut,
 	}
 }
 
-// Сбор метрик MemStats
-func (a *Agent) CollectMetric() {
-	for {
-		var RandomValue metrics.Gauge
-		runtime.ReadMemStats(&a.rtm)
-
-		// result := []string{}
-		result := []metrics.Metrics{}
-
-		for i, k := range reflect.VisibleFields(reflect.TypeOf(a.rtm)) {
-			value := reflect.ValueOf(a.rtm).Field(i)
-			switch {
-			case k.Type == reflect.TypeFor[uint64]():
-				v := float64(value.Interface().(uint64))
-				result = append(result, metrics.Metrics{
-					ID:    k.Name,
-					MType: "gauge",
-					Value: &v,
-				})
-			case k.Type == reflect.TypeFor[uint32]():
-				v := float64(value.Interface().(uint32))
-				result = append(result, metrics.Metrics{
-					ID:    k.Name,
-					MType: "gauge",
-					Value: &v,
-				})
-			case k.Type == reflect.TypeFor[float64]():
-				v := float64(value.Interface().(float64))
-				result = append(result, metrics.Metrics{
-					ID:    k.Name,
-					MType: "gauge",
-					Value: &v,
-				})
-			}
-		}
-
-		RandomValue = metrics.Gauge(rand.Float64())
-
-		result = append(result, metrics.Metrics{
-			ID:    "PollCount",
-			MType: "counter",
-			Delta: (*int64)(&a.pollCount),
-		})
-
-		result = append(result, metrics.Metrics{
-			ID:    "RandomValue",
-			MType: "gauge",
-			Value: (*float64)(&RandomValue),
-		})
-
-		a.pollCount += metrics.Counter(1)
-
-		time.Sleep(time.Duration(a.pollInterval) * time.Second)
-
-		a.mutex.Lock()
-		a.memoryStatistics = make([]metrics.Metrics, len(result))
-		copy(a.memoryStatistics, result)
-		a.mutex.Unlock()
-
-		a.logger.Infow("Metrics collected", "number", len(a.memoryStatistics))
-
+func (a *Agent) StartSendPostWorkers(numWorkers int) {
+	for w := 1; w <= numWorkers; w++ {
+		go a.SendPostWorker(w, a.WorkerChanIn, a.WorkerChanOut)
 	}
 }
 
-func gzipCompress(body []byte) (io.Reader, error) {
+func gzipCompress(body []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 
@@ -152,42 +112,76 @@ func gzipCompress(body []byte) (io.Reader, error) {
 	if err1 != nil {
 		return nil, err1
 	}
-	return &buf, nil
+	return buf.Bytes(), nil
 }
 
-// Отправка одного запроса Post
-func (a *Agent) SendPost(metric metrics.Metrics) (*http.Response, error) {
-	endpoint := a.BaseURL + updatePath
-	jsonData, err := json.Marshal(metric)
-	if err != nil {
-		log.Println("Unable to Marshal metric")
-		return nil, err
+// Воркеры
+func (a *Agent) SendPostWorker(id int, jobs chan metrics.Metrics, results chan struct {
+	response *http.Response
+	err      error
+}) {
+	for metric := range jobs {
+		a.logger.Infoln("Worker ", id, " is working on ", metric)
+		endpoint := a.BaseURL + updatePath
+		jsonData, err := json.Marshal(metric)
+		if err != nil {
+			a.logger.Warnln("Unable to Marshal metric")
+			results <- struct {
+				response *http.Response
+				err      error
+			}{nil, err}
+			continue
+		}
+
+		compressedBody, err := gzipCompress(jsonData)
+		if err != nil {
+			a.logger.Warnln("Unable to compress body")
+			continue
+		}
+
+		compressedBodyReader := bytes.NewReader(compressedBody)
+
+		req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
+		if err != nil {
+			a.logger.Fatalw("Unable to form request")
+		}
+
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Add("Content-Type", "application/json")
+
+		if a.hashKey != "" {
+			h := hmac.New(sha256.New, []byte(a.hashKey))
+			h.Write(compressedBody)
+			hash := hex.EncodeToString(h.Sum(nil))
+			req.Header.Add("Hash", hash)
+			a.logger.Infof("Hash is %s", hash)
+		}
+
+		resp, err := a.client.Do(req)
+		if err != nil {
+			results <- struct {
+				response *http.Response
+				err      error
+			}{resp, err}
+			continue
+		}
+
+		results <- struct {
+			response *http.Response
+			err      error
+		}{resp, err}
+
+		resp.Body.Close()
 	}
-
-	compressedBody, err := gzipCompress(jsonData)
-	if err != nil {
-		a.logger.Fatalw("Unable to compress body")
-	}
-
-	req, err := http.NewRequest("POST", endpoint, compressedBody)
-	if err != nil {
-		a.logger.Fatalw("Unable to form request")
-	}
-
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return resp, err
-	}
-	defer resp.Body.Close()
-
-	return resp, nil
 }
 
 // Отправка всех метрик
-func (a *Agent) SendAllMetrics() error {
+func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics, gopsIn chan []metrics.Metrics, workerIn chan metrics.Metrics, workerOut chan struct {
+	response *http.Response
+	err      error
+}) error {
+	memoryStatistics := make([]metrics.Metrics, 0)
+
 	a.logger.Infow("Waiting for server")
 	for {
 		resp, err := a.client.Get(a.BaseURL)
@@ -198,58 +192,91 @@ func (a *Agent) SendAllMetrics() error {
 		break
 	}
 	a.logger.Infow("Server is reachable")
-	for {
-		a.mutex.Lock()
-		memoryStatisticsCopy := make([]metrics.Metrics, len(a.memoryStatistics))
-		copy(memoryStatisticsCopy, a.memoryStatistics)
-		a.mutex.Unlock()
-		// batch mode
-		if a.batch {
-			endpoint := a.BaseURL + batchUpdatePath
-			if len(memoryStatisticsCopy) == 0 {
-				continue
+	// горутина поддерживает pollinterval
+	pollTicker := time.NewTicker(time.Duration(a.pollInterval) * time.Second)
+	reportTicker := time.NewTicker(time.Duration(a.reportInterval) * time.Second)
+	go func(memoryStatistics *[]metrics.Metrics) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pollTicker.C:
+				memoryMetrics := make([]metrics.Metrics, 0)
+				runtimeMetrics := <-memIn
+				gopsutilMetrics := <-gopsIn
+				memoryMetrics = append(memoryMetrics, runtimeMetrics...)
+				memoryMetrics = append(memoryMetrics, gopsutilMetrics...)
+				*memoryStatistics = memoryMetrics
 			}
-			jsonData, err := json.Marshal(memoryStatisticsCopy)
-			if err != nil {
-				a.logger.Fatalw("unable to marshal []metric")
-			}
-
-			compressedBody, err := gzipCompress(jsonData)
-			if err != nil {
-				a.logger.Fatalw("Unable to compress body")
-			}
-
-			req, err := http.NewRequest("POST", endpoint, compressedBody)
-			if err != nil {
-				a.logger.Fatalw("Unable to form request")
-			}
-
-			req.Header.Set("Content-Encoding", "gzip")
-			req.Header.Add("Content-Type", "application/json")
-
-			resp, err := a.client.Do(req)
-			if err != nil {
-				return err
-			}
-			a.logger.Infow("Batch Metrics sent successfully")
-			defer resp.Body.Close()
 		}
-
-		// single metric mode
-		if !a.batch {
-			for _, s := range memoryStatisticsCopy {
-				resp, err := a.SendPost(s)
-				if err != nil {
-					log.Printf("При отправке метрик произошла ошибка: %v", err)
+	}(&memoryStatistics)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-reportTicker.C:
+			// batch mode
+			if a.batch {
+				endpoint := a.BaseURL + batchUpdatePath
+				if len(memoryStatistics) == 0 {
 					continue
 				}
-				a.logger.Infow("Response received",
-					"status", resp.StatusCode,
-					"Content-Type", resp.Header.Get("Content-Type"),
-					"Content-Encoding", resp.Header.Get("Content-Encoding"))
-				resp.Body.Close()
+				jsonData, err := json.Marshal(memoryStatistics)
+				if err != nil {
+					a.logger.Fatalw("unable to marshal []metric")
+				}
+
+				compressedBody, err := gzipCompress(jsonData)
+				if err != nil {
+					a.logger.Fatalw("Unable to compress body")
+				}
+
+				compressedBodyReader := bytes.NewReader(compressedBody)
+
+				req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
+				if err != nil {
+					a.logger.Fatalw("Unable to form request")
+				}
+
+				req.Header.Set("Content-Encoding", "gzip")
+				req.Header.Add("Content-Type", "application/json")
+
+				if a.hashKey != "" {
+					buf, err := io.ReadAll(bytes.NewReader(compressedBody))
+					if err != nil {
+						a.logger.Warnf("read body error: %w", err)
+					}
+
+					h := hmac.New(sha256.New, []byte(a.hashKey))
+					h.Write(buf)
+					req.Header.Add("Hash", hex.EncodeToString(h.Sum(nil)))
+				}
+
+				resp, err := a.client.Do(req)
+				if err != nil {
+					return err
+				}
+				a.logger.Infow("Batch Metrics sent successfully")
+				defer resp.Body.Close()
+			}
+
+			// single metric mode
+			if !a.batch {
+				for _, s := range memoryStatistics {
+					workerIn <- s
+					response := <-workerOut
+
+					if response.err != nil {
+						log.Printf("При отправке метрик произошла ошибка: %v", response.err)
+						continue
+					}
+					a.logger.Infow("Response received",
+						"status", response.response.StatusCode,
+						"Content-Type", response.response.Header.Get("Content-Type"),
+						"Content-Encoding", response.response.Header.Get("Content-Encoding"))
+					response.response.Body.Close()
+				}
 			}
 		}
-		time.Sleep(time.Duration(a.reportInterval) * time.Second)
 	}
 }

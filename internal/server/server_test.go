@@ -49,7 +49,7 @@ func TestServer_UpdateMetricJSONHandler(t *testing.T) {
 			logger, _ := zap.NewDevelopment()
 			sugar := logger.Sugar()
 			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
-			server := New(tt.args.url, storage, sugar)
+			server := New(tt.args.url, storage, "", sugar)
 			tt.args.requestBody.Delta = (*int64)(&tt.args.metricDelta)
 			jsonBody, err := json.Marshal(tt.args.requestBody)
 			if err != nil {
