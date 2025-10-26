@@ -33,7 +33,7 @@ type Server struct {
 	HTTPServer *http.Server
 	Router     *chi.Mux
 	hashKey    string
-	AuditCh    chan []string
+	AuditCh    chan metrics.AuditMetrics
 }
 
 func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger) *Server {
@@ -54,6 +54,8 @@ func New(address string, repo storage.StorageInterface, hashKey string, logger *
 	})
 	s.Router.Post("/updates/", s.UpdateBatchMetricsJSONHandler)
 
+	s.Router.Mount("/debug/pprof", http.DefaultServeMux)
+
 	s.storage = repo
 	s.logger = logger
 	s.hashKey = hashKey
@@ -62,7 +64,7 @@ func New(address string, repo storage.StorageInterface, hashKey string, logger *
 		Addr:    address,
 		Handler: s.Router,
 	}
-	s.AuditCh = make(chan []string, 50)
+	s.AuditCh = make(chan metrics.AuditMetrics, 50)
 
 	return s
 }
@@ -388,8 +390,11 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 }
 
 func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
-	var metrics []metrics.Metrics
-	var buf bytes.Buffer
+	var (
+		metricsRead []metrics.Metrics
+		metricNames []string
+		buf         bytes.Buffer
+	)
 
 	_, err := buf.ReadFrom(r.Body)
 	if err != nil {
@@ -406,19 +411,27 @@ func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
-	if err = json.Unmarshal(body, &metrics); err != nil {
+	if err = json.Unmarshal(body, &metricsRead); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	metricNames := make([]string, 0)
-	for _, v := range metrics {
+	server.logger.Infoln(r.RemoteAddr)
+	// Audit section ITER16
+	metricNames = make([]string, 0, len(metricsRead))
+	for _, v := range metricsRead {
 		metricNames = append(metricNames, v.ID)
 	}
 
-	server.AuditCh <- metricNames
+	auditEntry := metrics.AuditMetrics{
+		TS:          time.Now().Unix(),
+		MetricNames: metricNames,
+		IP:          r.RemoteAddr,
+	}
 
-	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metrics)
+	server.AuditCh <- auditEntry
+
+	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metricsRead)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -449,10 +462,14 @@ func (server *Server) DatabasePinger(w http.ResponseWriter, r *http.Request) {
 func (server *Server) AuditLogger(auditFile string, auditURL string) {
 	var file *os.File
 	var err error
-	var auditEntry metrics.AuditMetrics
+	var client = http.Client{}
+
+	if auditFile == "" && auditURL == "" {
+		return
+	}
 
 	if auditFile != "" {
-		file, err = os.OpenFile(auditFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		file, err = os.OpenFile(auditFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE|os.O_TRUNC, 0666)
 		if err != nil {
 			server.logger.Errorln("Unable to open or create audit file")
 			return
@@ -460,27 +477,27 @@ func (server *Server) AuditLogger(auditFile string, auditURL string) {
 		server.logger.Infoln("Audit file created", auditFile)
 	}
 
-	if file != nil {
-		for {
-			metricNames := <-server.AuditCh
-			auditEntry = metrics.AuditMetrics{
-				TS:          time.Now().Unix(),
-				MetricNames: metricNames,
-				IP:          "localhost",
-			}
-			data, err := json.MarshalIndent(&auditEntry, "", "  ")
-			if err != nil {
-				server.logger.Errorln("Unable to write to audit file")
-				continue
-			}
-
-			_, err = file.Write(data)
-			_, err = file.Write([]byte(","))
-			if err != nil {
-				server.logger.Errorln("Unable to write to audit file")
-				continue
-			}
-			server.logger.Infoln(metricNames)
+	for {
+		auditEntry := <-server.AuditCh
+		data, err := json.MarshalIndent(&auditEntry, "", "  ")
+		if err != nil {
+			server.logger.Warnln("Unable to marshal metrics to audit", err)
+			continue
 		}
+
+		_, err = file.Write(data)
+		_, err = file.Write([]byte("\n"))
+		if err != nil {
+			server.logger.Warnln("Unable to write to audit file", err)
+			continue
+		}
+		if auditURL != "" {
+			resp, err := client.Post(auditURL, "json", bytes.NewBuffer(data))
+			if err != nil {
+				server.logger.Warnln("Unable to write to auditURL", err)
+			}
+			server.logger.Infoln(resp)
+		}
+		server.logger.Debugln(auditEntry)
 	}
 }
