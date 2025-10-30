@@ -55,7 +55,7 @@ func main() {
 	sugar.Infow("Config applied",
 		"cfg", cfg)
 	go storage.BackupService(cfg.StoreInterval)
-	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar)
+	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar, cfg.CryptoKey)
 	go server.Start()
 	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 

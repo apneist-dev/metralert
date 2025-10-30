@@ -39,6 +39,7 @@ type Server struct {
 	AuditCh         chan metrics.AuditMetrics
 	MetricPool      *reset.PoolNaive[*metrics.Metrics]
 	BatchMetricPool *reset.PoolNaive[*metrics.MetricsGroup]
+	PrivateKeyPath  string
 }
 
 // New creates and configures a new Server instance with the specified address, storage repository,
@@ -52,11 +53,16 @@ type Server struct {
 //
 // Returns:
 //   - A pointer to the newly created Server instance
-func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger) *Server {
+func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger, PrivateKeyPath string) *Server {
 	s := &Server{}
 	s.Router = chi.NewRouter()
 	s.Router.Use(s.loggingMiddleware, s.verifyHashMiddleware, s.hashMiddleware)
 
+	s.PrivateKeyPath = PrivateKeyPath
+
+	if s.PrivateKeyPath != "" {
+		s.Router.Use(s.DecryptMiddleware)
+	}
 	s.Router.Use(middleware.Compress(5, "application/json", "text/html"))
 	s.Router.Get("/ping", s.DatabasePinger)
 	s.Router.Route("/update", func(router chi.Router) {
@@ -239,6 +245,33 @@ func (server *Server) hashMiddleware(next http.Handler) http.Handler {
 
 		// Пишем хеш
 		w.Header().Set("Hashsha256", calculatedHash)
+
+		next.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(logFn)
+}
+
+// DecryptMiddleware is a middleware function that decrypts the request body using RSA decryption.
+// It reads the encrypted body, decrypts it using the private key, and restores the decrypted body.
+func (server *Server) DecryptMiddleware(next http.Handler) http.Handler {
+	logFn := func(w http.ResponseWriter, r *http.Request) {
+
+		// Читаем тело запроса
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		decryptedBody, err := RetrieveDecrypt(body, server.PrivateKeyPath)
+		if err != nil {
+			http.Error(w, "Failed to decrypt body", http.StatusInternalServerError)
+			return
+		}
+
+		// Восстанавливаем тело
+		r.Body = io.NopCloser(bytes.NewReader(decryptedBody))
 
 		next.ServeHTTP(w, r)
 	}
@@ -561,7 +594,6 @@ func (server *Server) AuditLogger(auditFile string, auditURL string) {
 			if err != nil {
 				server.logger.Warnln("Unable to write to auditURL", err)
 			}
-			defer resp.Body.Close()
 			server.logger.Infoln(resp)
 			resp.Body.Close()
 		}

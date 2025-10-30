@@ -1,75 +1,116 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/caarlos0/env/v6"
 )
 
 type Config struct {
-	ServerAddress   string `env:"ADDRESS"`
-	StoreInterval   int    `env:"STORE_INTERVAL"`
-	FileStoragePath string `env:"FILE_STORAGE_PATH"`
-	Restore         bool   `env:"RESTORE"`
-	DatabaseAddress string `env:"DATABASE_DSN"`
-	HashKey         string `env:"KEY"`
-	AuditFile       string `env:"AUDIT_FILE"`
-	AuditURL        string `env:"AUDIT_URL"`
+	ServerAddress   string `env:"ADDRESS" json:"address"`
+	StoreInterval   int    `env:"STORE_INTERVAL" json:"store_interval"`
+	FileStoragePath string `env:"FILE_STORAGE_PATH" json:"store_file"`
+	Restore         bool   `env:"RESTORE" json:"restore"`
+	DatabaseAddress string `env:"DATABASE_DSN" json:"database_dsn"`
+	HashKey         string `env:"KEY" json:"-"`
+	AuditFile       string `env:"AUDIT_FILE" json:"-"`
+	AuditURL        string `env:"AUDIT_URL" json:"-"`
+	CryptoKey       string `env:"CRYPTO_KEY" json:"crypto_key"`
+	ConfigFile      string `env:"CONFIG" json:"-"`
+}
+
+func (cfg *Config) ParseFlags() {
+
+	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "server url")
+	flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
+	flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
+	flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
 }
 
 func (cfg *Config) GetConfig() {
+
+	var fileCfg Config
+
+	// flag config
+	flag.StringVar(&cfg.ConfigFile, "c", "", "json config file")
+	flag.StringVar(&cfg.ServerAddress, "a", "", "server url")
+	flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
+	flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
+	flag.BoolVar(&cfg.Restore, "r", false, "restore metrics on startup")
+	flag.StringVar(&cfg.DatabaseAddress, "d", "", "database dsn")
+	flag.StringVar(&cfg.HashKey, "k", "", "hash key")
+	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path of a file to store audit logs")
+	flag.StringVar(&cfg.AuditURL, "audit-url", "", "path of a file to store audit logs")
+	flag.StringVar(&cfg.CryptoKey, "crypto_key", "", "private key")
+	flag.Parse()
+
+	// env config
 	err := env.Parse(cfg)
 	if err != nil {
-		fmt.Println("Переменная окружения ADDRESS не определена")
+		fmt.Println("не удалось выполнить парсинг переменных окружения")
 	}
-	_, StoreIntervalSet := os.LookupEnv("STORE_INTERVAL")
-	_, RestoreSet := os.LookupEnv("RESTORE")
+
+	// json config
+	fmt.Println("reading config file: ", cfg.ConfigFile)
+	if cfg.ConfigFile != "" {
+		data, err := os.ReadFile(cfg.ConfigFile)
+		if err != nil {
+			fmt.Println("unable to read file", cfg.ConfigFile)
+		}
+		if err = UnmarshalJSON(data, &fileCfg); err != nil {
+			fmt.Println("unable to unmarshal file", cfg.ConfigFile)
+		}
+	}
 
 	if cfg.ServerAddress == "" {
-		flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "server url")
-	} else {
-		flag.String("a", "localhost:8080", "server url")
+		cfg.ServerAddress = fileCfg.ServerAddress
 	}
-	if cfg.StoreInterval == 0 && !StoreIntervalSet {
-		flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
-	} else {
-		flag.Int("i", 300, "file swap interval")
+	if cfg.StoreInterval == 0 {
+		cfg.StoreInterval = fileCfg.StoreInterval
 	}
 	if cfg.FileStoragePath == "" {
-		flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
-	} else {
-		flag.String("f", "metrics_database.json", "filename to store metrics")
+		cfg.FileStoragePath = fileCfg.FileStoragePath
 	}
-	if !RestoreSet && !cfg.Restore {
-		flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
-	} else {
-		flag.Bool("r", true, "restore metrics on startup")
+	if !cfg.Restore {
+		cfg.Restore = fileCfg.Restore
 	}
-	// "host=localhost user=postgres password=postgres dbname=postgres sslmode=disable"
-	// "postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable"
 	if cfg.DatabaseAddress == "" {
-		flag.StringVar(&cfg.DatabaseAddress, "d", "", "database dsn")
+		cfg.DatabaseAddress = fileCfg.DatabaseAddress
 	}
 
-	if cfg.HashKey == "" {
-		flag.StringVar(&cfg.HashKey, "k", "", "hash key")
-	} else {
-		flag.String("k", "", "hash key")
+	// set defaults
+	if cfg.ServerAddress == "" {
+		cfg.ServerAddress = "localhost:8080"
+	}
+	if cfg.StoreInterval == 0 {
+		cfg.StoreInterval = 300
 	}
 
-	if cfg.AuditFile == "" {
-		flag.StringVar(&cfg.AuditFile, "audit-file", "", "path of a file to store audit logs")
-	} else {
-		flag.String("audit-file", "", "path of a file to store audit logs")
-	}
+	// _, StoreIntervalSet := os.LookupEnv("STORE_INTERVAL")
+	// _, RestoreSet := os.LookupEnv("RESTORE")
 
-	if cfg.AuditURL == "" {
-		flag.StringVar(&cfg.AuditURL, "audit-url", "", "path of a file to store audit logs")
-	} else {
-		flag.String("audit-url", "", "URL to store audit logs")
-	}
+}
 
-	flag.Parse()
+func UnmarshalJSON(data []byte, c *Config) (err error) {
+	type ConfigAlias Config
+
+	aliasValue := &struct {
+		*ConfigAlias
+		StoreInterval string `json:"store_interval"`
+	}{ConfigAlias: (*ConfigAlias)(c)}
+
+	if err = json.Unmarshal(data, aliasValue); err != nil {
+		return
+	}
+	aliasValue.StoreInterval = strings.TrimSuffix(aliasValue.StoreInterval, "s")
+	c.StoreInterval, err = strconv.Atoi(aliasValue.StoreInterval)
+	if err != nil {
+		return err
+	}
+	return
 }

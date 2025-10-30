@@ -79,12 +79,12 @@ func TestAgent_SendPost(t *testing.T) {
 			sugar := logger.Sugar()
 			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
 
-			server := server.New(tt.fields.serverurl, storage, "", sugar)
+			server := server.New(tt.fields.serverurl, storage, "", sugar, "")
 			go server.Start()
 			time.Sleep(time.Second * 3)
 
 			tt.args.metric.Value = (&tt.args.randValue)
-			a := New(tt.fields.agenturl, tt.fields.pollInterval, tt.fields.reportInterval, "1234567890123456", sugar, true)
+			a := New(tt.fields.agenturl, tt.fields.pollInterval, tt.fields.reportInterval, "1234567890123456", sugar, true, "")
 			a.logger.Info("Agent created successfully", a)
 		})
 	}
