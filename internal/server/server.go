@@ -594,7 +594,6 @@ func (server *Server) AuditLogger(auditFile string, auditURL string) {
 			if err != nil {
 				server.logger.Warnln("Unable to write to auditURL", err)
 			}
-			defer resp.Body.Close()
 			server.logger.Infoln(resp)
 			resp.Body.Close()
 		}
