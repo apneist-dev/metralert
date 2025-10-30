@@ -53,7 +53,7 @@ func NewMemstorage(fileStoragePath string, recover bool, logger *zap.SugaredLogg
 	return &m
 }
 
-func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
+func (m *MemStorage) ValidateMetric(metric metrics.Metrics) error {
 	var err error
 	switch metric.MType {
 	case "gauge":
@@ -70,7 +70,7 @@ func (m *MemStorage) validateMetric(metric metrics.Metrics) error {
 
 func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (metrics.Metrics, error) {
 	var emptyMetric metrics.Metrics
-	err := m.validateMetric(metric)
+	err := m.ValidateMetric(metric)
 	if err != nil {
 		return emptyMetric, err
 	}
