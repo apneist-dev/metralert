@@ -530,9 +530,13 @@ func (server *Server) AuditLogger(auditFile string, auditURL string) {
 		}
 
 		_, err = file.Write(data)
-		_, err = file.Write([]byte("\n"))
 		if err != nil {
 			server.logger.Warnln("Unable to write to audit file", err)
+			continue
+		}
+		_, err = file.Write([]byte("\n"))
+		if err != nil {
+			server.logger.Warnln("Unable to write linebraker to audit file", err)
 			continue
 		}
 		if auditURL != "" {
@@ -540,6 +544,7 @@ func (server *Server) AuditLogger(auditFile string, auditURL string) {
 			if err != nil {
 				server.logger.Warnln("Unable to write to auditURL", err)
 			}
+			defer resp.Body.Close()
 			server.logger.Infoln(resp)
 		}
 		server.logger.Debugln(auditEntry)
