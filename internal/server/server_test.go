@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"metralert/internal/metrics"
 	"metralert/internal/storage"
 	"net/http"
@@ -67,4 +69,60 @@ func TestServer_UpdateMetricJSONHandler(t *testing.T) {
 
 		})
 	}
+}
+
+func ExampleServer_UpdateMetricJSONHandler() {
+	logger, _ := zap.NewDevelopment()
+	sugar := logger.Sugar()
+	storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
+	server := New("http://localhost:8080", storage, "", sugar)
+	jsonBody, err := json.Marshal(metrics.Metrics{
+		ID:    "NewCounter",
+		MType: "counter",
+	})
+	if err != nil {
+		fmt.Printf("Failed to marshal JSON: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBuffer(jsonBody))
+	w := httptest.NewRecorder()
+	server.UpdateMetricJSONHandler(w, r)
+}
+
+func ExampleServer_ReadMetricJSONHandler() {
+	var TestDelta int64 = 123
+
+	logger, _ := zap.NewDevelopment()
+	sugar := logger.Sugar()
+	storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
+	server := New("http://localhost:8080", storage, "", sugar)
+	metricsNewCounter := metrics.Metrics{
+		ID:    "NewCounter",
+		MType: "counter",
+	}
+
+	metricsNewCounter.Delta = &TestDelta
+
+	jsonBody, err := json.Marshal(metricsNewCounter)
+	if err != nil {
+		fmt.Printf("Failed to marshal JSON: %v", err)
+	}
+
+	ctx := context.Background()
+
+	_, err = server.storage.UpdateMetric(ctx, metricsNewCounter)
+	if err != nil {
+		fmt.Printf("Failed to update metric: %v", err)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewBuffer(jsonBody))
+	w := httptest.NewRecorder()
+
+	server.ReadMetricJSONHandler(w, r)
+
+	fmt.Println("Response Code is", w.Code)
+	fmt.Println("Response Body is", w.Body)
+
+	// Output:
+	// Response Code is 200
+	// Response Body is {"id":"NewCounter","type":"counter","delta":123}
 }
