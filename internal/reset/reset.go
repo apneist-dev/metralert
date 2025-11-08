@@ -73,6 +73,7 @@ var basicTypesNum = []string{
 func (p *ResetParam) GenResetAction() {
 	if p.MapFlag == true {
 		p.ResetAction = fmt.Sprintf("clear(rs.%s)\n", p.FieldName)
+		return
 	}
 	if p.ArrayFlag == true {
 		p.ResetAction = fmt.Sprintf("rs.%s = rs.%s[:0]\n", p.FieldName, p.FieldName)
@@ -180,8 +181,6 @@ func (rp *ResetPackage) RenderTemplate(dir string, FileExistsFlag bool) error {
 		}
 	}
 
-	// fmt.Print(string(buf.Bytes()))
-
 	bufFmt, err := format.Source(buf.Bytes())
 	if err != nil {
 		panic(err)
@@ -206,11 +205,6 @@ func (rp *ResetPackage) RenderTemplate(dir string, FileExistsFlag bool) error {
 			return err
 		}
 
-		// err = os.WriteFile(fmt.Sprint(dir, "/reset.gen.go"), bufFmt, 0666)
-		// if err != nil {
-		// 	fmt.Printf("unable to write file for %s", dir)
-		// 	return err
-		// }
 		fmt.Printf("%sreset.gen.go created\n", dir)
 		return nil
 	}
@@ -235,7 +229,7 @@ func GenerateReset(filename string) *ResetPackage {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 	if err != nil {
-		// fmt.Printf("Failed to parse file %v\n", f)
+		fmt.Printf("Failed to parse file %v\n", f)
 		return nil
 	}
 
@@ -259,16 +253,13 @@ func GenerateReset(filename string) *ResetPackage {
 				if gd.Doc.List != nil {
 					for _, c := range gd.Doc.List {
 						if strings.HasPrefix(c.Text, "// generate:reset") {
-							// fmt.Println(fset.Position(c.Slash).String(), c.Text)
 
 							sp := ResetStruct{}
-							structParams := []ResetParam{}
-
 							for _, s := range gd.Specs {
 								if ts, ok := s.(*ast.TypeSpec); ok {
 									sp.Name = ts.Name.Name
 									if st, ok := ts.Type.(*ast.StructType); ok {
-										structParams = make([]ResetParam, 0, len(st.Fields.List)) // делаем чтобы не переалоцировать память при аппендах
+										structParams := make([]ResetParam, 0, len(st.Fields.List)) // делаем чтобы не переалоцировать память при аппендах
 										for _, field := range st.Fields.List {
 											if len(field.Names) < 1 {
 												continue
@@ -310,9 +301,6 @@ func GenerateReset(filename string) *ResetPackage {
 											}
 
 											structP.GenResetAction()
-											if err != nil {
-												fmt.Println("unable to generate reset action")
-											}
 
 											structParams = append(structParams, structP)
 
