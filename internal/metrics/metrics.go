@@ -17,13 +17,3 @@ type AuditMetrics struct {
 	MetricNames []string `json:"metrics"`
 	IP          string   `json:"ip_address"`
 }
-
-// generate:reset
-type ResetableStruct struct {
-	i     int
-	str   string
-	strP  *string
-	s     []int
-	m     map[string]string
-	child *ResetableStruct
-}
