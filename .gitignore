@@ -32,4 +32,4 @@ auditlog.json
 /autotests
 
 # Generated files
-**/*.gen.go
+# **/*.gen.go
