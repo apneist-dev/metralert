@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"metralert/internal/metrics"
+	"metralert/internal/reset"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -45,6 +46,7 @@ type Agent struct {
 		response *http.Response
 		err      error
 	}
+	metricsPool *reset.Pool[*metrics.MetricsGroup]
 }
 
 // Конструктор агента
@@ -70,6 +72,10 @@ func New(address string, pollInterval int, reportInterval int, hashKey string, l
 
 	standardClient := *retryClient.StandardClient()
 
+	metricsPool := reset.NewPool(func() *metrics.MetricsGroup {
+		return &metrics.MetricsGroup{Slice: make([]metrics.Metrics, 0)}
+	})
+
 	workerChanIn := make(chan metrics.Metrics, metricsMax)
 	workerChanOut := make(chan struct {
 		response *http.Response
@@ -90,6 +96,7 @@ func New(address string, pollInterval int, reportInterval int, hashKey string, l
 		hashKey:          hashKey,
 		WorkerChanIn:     workerChanIn,
 		WorkerChanOut:    workerChanOut,
+		metricsPool:      metricsPool,
 	}
 }
 
@@ -180,9 +187,10 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 	response *http.Response
 	err      error
 }) error {
-	memoryStatistics := make([]metrics.Metrics, 0)
+	// memoryStatistics := make([]metrics.Metrics, 0)
+	metricsGroup := a.metricsPool.Get()
+	memoryStatistics := metricsGroup.Slice
 
-	a.logger.Infow("Waiting for server")
 	for {
 		resp, err := a.client.Get(a.BaseURL)
 		if err != nil {
@@ -225,6 +233,14 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 				if err != nil {
 					a.logger.Fatalw("unable to marshal []metric")
 				}
+
+				// как только мы использовали memoryStatistics, мы можем вернуть структуры в пул
+				metricsGroup.Reset()
+				a.metricsPool.Put(metricsGroup)
+
+				// Получаем новый объект из пула для следующего использования
+				metricsGroup = a.metricsPool.Get()
+				memoryStatistics = metricsGroup.Slice
 
 				compressedBody, err := gzipCompress(jsonData)
 				if err != nil {
