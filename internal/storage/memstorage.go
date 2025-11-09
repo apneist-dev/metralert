@@ -13,6 +13,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	GaugeStr   string = "gauge"
+	CounterStr string = "counter"
+)
+
 type MemStorage struct {
 	db              map[string]metrics.Metrics
 	fileStoragePath string
@@ -56,11 +61,11 @@ func NewMemstorage(fileStoragePath string, recover bool, logger *zap.SugaredLogg
 func (m *MemStorage) ValidateMetric(metric metrics.Metrics) error {
 	var err error
 	switch metric.MType {
-	case "gauge":
+	case GaugeStr:
 		if metric.Value == nil {
 			return errors.New("invalid Value")
 		}
-	case "counter":
+	case CounterStr:
 		if metric.Delta == nil {
 			return errors.New("invalid Delta")
 		}
@@ -68,11 +73,11 @@ func (m *MemStorage) ValidateMetric(metric metrics.Metrics) error {
 	return err
 }
 
-func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (metrics.Metrics, error) {
-	var emptyMetric metrics.Metrics
+func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (*metrics.Metrics, error) {
+	// var emptyMetric metrics.Metrics
 	err := m.ValidateMetric(metric)
 	if err != nil {
-		return emptyMetric, err
+		return nil, err
 	}
 
 	// case in-memory
@@ -100,7 +105,8 @@ func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (me
 	default:
 		err = errors.New("invalid Mtype")
 	}
-	return m.db[metric.ID], err
+	metricItem := m.db[metric.ID]
+	return &metricItem, err
 }
 
 func (m *MemStorage) UpdateBatchMetrics(_ context.Context, metricsSlice []metrics.Metrics) ([]metrics.Metrics, error) {
@@ -140,10 +146,10 @@ func (m *MemStorage) UpdateBatchMetrics(_ context.Context, metricsSlice []metric
 	return result, errors.Join(errs...)
 }
 
-func (m *MemStorage) GetMetricByName(_ context.Context, metric metrics.Metrics) (metrics.Metrics, bool) {
+func (m *MemStorage) GetMetricByName(_ context.Context, metric metrics.Metrics) (*metrics.Metrics, bool) {
 	// case in-memory
 	result, ok := m.db[metric.ID]
-	return result, ok
+	return &result, ok
 }
 
 func (m *MemStorage) GetMetrics(_ context.Context) (map[string]any, error) {

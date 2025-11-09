@@ -289,7 +289,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		MType: metrictype,
 	}
 
-	resultMetric := metrics.Metrics{}
+	resultMetric := &metrics.Metrics{}
 
 	types := []string{"gauge", "counter"}
 	if !slices.Contains(types, metrictype) {
