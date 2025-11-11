@@ -28,17 +28,19 @@ func main() {
 	sugar := logger.Sugar()
 
 	storage := storage.NewStorage(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
-	sugar.Infow("Config",
-		"cfg.ServerAddress", cfg.ServerAddress,
-		"cfg.Restore", cfg.Restore,
-		"cfg.FileStoragePath", cfg.FileStoragePath,
-		"cfg.DatabaseAddress", cfg.DatabaseAddress,
-		"cfg.StoreInterval", cfg.StoreInterval,
-		"cfg.HashKey", cfg.HashKey)
-
+	// sugar.Infow("Config",
+	// 	"cfg.ServerAddress", cfg.ServerAddress,
+	// 	"cfg.Restore", cfg.Restore,
+	// 	"cfg.FileStoragePath", cfg.FileStoragePath,
+	// 	"cfg.DatabaseAddress", cfg.DatabaseAddress,
+	// 	"cfg.StoreInterval", cfg.StoreInterval,
+	// 	"cfg.HashKey", cfg.HashKey)
+	sugar.Infow("Config applied",
+		"cfg", cfg)
 	go storage.BackupService(cfg.StoreInterval)
 	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar)
 	go server.Start()
+	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 
 	<-shutdownCh
 	server.Shutdown()
