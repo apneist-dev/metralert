@@ -30,3 +30,6 @@ metrics_database.json
 auditlog.json
 /bruno
 /autotests
+
+# crypto keys
+**.pem

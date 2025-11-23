@@ -84,7 +84,7 @@ func TestAgent_SendPost(t *testing.T) {
 			time.Sleep(time.Second * 3)
 
 			tt.args.metric.Value = (&tt.args.randValue)
-			a := New(tt.fields.agenturl, tt.fields.pollInterval, tt.fields.reportInterval, "1234567890123456", sugar, true)
+			a := New(tt.fields.agenturl, tt.fields.pollInterval, tt.fields.reportInterval, "1234567890123456", sugar, true, "")
 			a.logger.Info("Agent created successfully", a)
 		})
 	}

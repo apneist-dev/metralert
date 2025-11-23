@@ -59,6 +59,7 @@ type Agent struct {
 		response *http.Response
 		err      error
 	}
+	PublicKeyPath string
 }
 
 // New создает новый экземпляр Agent.
@@ -68,7 +69,7 @@ type Agent struct {
 // hashKey - ключ для вычисления хеша тела запроса.
 // logger - логгер для записи логов.
 // batch - флаг, указывающий, использовать ли пакетную отправку метрик.
-func New(address string, pollInterval int, reportInterval int, hashKey string, logger *zap.SugaredLogger, batch bool) *Agent {
+func New(address string, pollInterval int, reportInterval int, hashKey string, logger *zap.SugaredLogger, batch bool, publicKeyPath string) *Agent {
 	if !strings.Contains(address, "http") {
 		address = "http://" + address
 	}
@@ -110,6 +111,7 @@ func New(address string, pollInterval int, reportInterval int, hashKey string, l
 		hashKey:          hashKey,
 		WorkerChanIn:     workerChanIn,
 		WorkerChanOut:    workerChanOut,
+		PublicKeyPath:    publicKeyPath,
 	}
 }
 
@@ -251,7 +253,17 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 					a.logger.Fatalw("unable to marshal []metric")
 				}
 
-				compressedBody, err := gzipCompress(jsonData)
+				Data := jsonData
+
+				if a.PublicKeyPath != "" {
+					EncrypredData, err := RetrieveEncrypt(Data, a.PublicKeyPath)
+					if err != nil {
+						return err
+					}
+					Data = EncrypredData
+				}
+
+				compressedBody, err := gzipCompress(Data)
 				if err != nil {
 					a.logger.Fatalw("Unable to compress body")
 				}

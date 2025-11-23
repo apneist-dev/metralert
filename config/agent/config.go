@@ -13,6 +13,7 @@ type Config struct {
 	PollInterval   int    `env:"POLL_INTERVAL"`
 	HashKey        string `env:"KEY"`
 	RateLimit      int    `env:"RATE_LIMIT"`
+	CryptoKey      string `env:"CRYPTO_KEY"`
 }
 
 func (cfg *Config) GetConfig() {
@@ -41,6 +42,10 @@ func (cfg *Config) GetConfig() {
 
 	if cfg.RateLimit == 0 {
 		flag.IntVar(&cfg.RateLimit, "l", 5, "rate limit")
+	}
+
+	if cfg.CryptoKey == "" {
+		flag.StringVar(&cfg.CryptoKey, "crypto-key", "", "Public Key")
 	}
 
 	flag.Parse()
