@@ -6,6 +6,7 @@ import (
 	"metralert/internal/agent"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +16,7 @@ import (
 func main() {
 
 	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

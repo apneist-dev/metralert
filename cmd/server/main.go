@@ -7,6 +7,7 @@ import (
 	"metralert/internal/storage"
 	"os"
 	"os/signal"
+	"syscall"
 
 	serverconfig "metralert/config/server"
 
@@ -32,7 +33,7 @@ func main() {
 	PrintTags()
 
 	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	cfg := serverconfig.Config{}
 	cfg.GetConfig()
