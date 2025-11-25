@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"metralert/internal/metrics"
+	"metralert/internal/reset"
 	"metralert/internal/storage"
 
 	"github.com/go-chi/chi/v5"
@@ -30,12 +31,14 @@ import (
 
 // Server represents the main server structure that handles HTTP requests and manages metrics storage.
 type Server struct {
-	storage    storage.StorageInterface
-	logger     *zap.SugaredLogger
-	HTTPServer *http.Server
-	Router     *chi.Mux
-	hashKey    string
-	AuditCh    chan metrics.AuditMetrics
+	storage         storage.StorageInterface
+	logger          *zap.SugaredLogger
+	HTTPServer      *http.Server
+	Router          *chi.Mux
+	hashKey         string
+	AuditCh         chan metrics.AuditMetrics
+	MetricPool      *reset.PoolNaive[*metrics.Metrics]
+	BatchMetricPool *reset.PoolNaive[*metrics.MetricsGroup]
 }
 
 // New creates and configures a new Server instance with the specified address, storage repository,
@@ -78,6 +81,16 @@ func New(address string, repo storage.StorageInterface, hashKey string, logger *
 		Handler: s.Router,
 	}
 	s.AuditCh = make(chan metrics.AuditMetrics, 50)
+
+	s.MetricPool = reset.NewPoolNaive(func() *metrics.Metrics {
+		return &metrics.Metrics{}
+	})
+
+	s.BatchMetricPool = reset.NewPoolNaive(func() *metrics.MetricsGroup {
+		return &metrics.MetricsGroup{
+			Slice: make([]metrics.Metrics, 50),
+		}
+	})
 
 	return s
 }
@@ -289,7 +302,7 @@ func (server *Server) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		MType: metrictype,
 	}
 
-	resultMetric := metrics.Metrics{}
+	resultMetric := &metrics.Metrics{}
 
 	types := []string{"gauge", "counter"}
 	if !slices.Contains(types, metrictype) {
@@ -386,7 +399,8 @@ func gzipDecompress(body []byte) ([]byte, error) {
 // UpdateMetricJSONHandler handles POST requests to update a single metric via JSON payload.
 // It supports both counter and gauge metric types, with optional gzip compression.
 func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Request) {
-	var metric metrics.Metrics
+	metric := server.MetricPool.Get()
+	defer server.MetricPool.Put(metric)
 	var buf bytes.Buffer
 
 	_, err := buf.ReadFrom(r.Body)
@@ -409,7 +423,7 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resultMetric, err := server.storage.UpdateMetric(r.Context(), metric)
+	resultMetric, err := server.storage.UpdateMetric(r.Context(), *metric)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
@@ -430,10 +444,13 @@ func (server *Server) UpdateMetricJSONHandler(w http.ResponseWriter, r *http.Req
 // It supports optional gzip compression and performs audit logging of the updated metrics.
 func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 	var (
-		metricsRead []metrics.Metrics
+		// metricsRead []metrics.Metrics
 		metricNames []string
 		buf         bytes.Buffer
 	)
+
+	metricsRead := server.BatchMetricPool.Get()
+	defer server.BatchMetricPool.Put(metricsRead)
 
 	_, err := buf.ReadFrom(r.Body)
 	if err != nil {
@@ -450,15 +467,15 @@ func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
-	if err = json.Unmarshal(body, &metricsRead); err != nil {
+	if err = json.Unmarshal(body, &metricsRead.Slice); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	server.logger.Infoln(r.RemoteAddr)
 	// Audit section ITER16
-	metricNames = make([]string, 0, len(metricsRead))
-	for _, v := range metricsRead {
+	metricNames = make([]string, 0, len(metricsRead.Slice))
+	for _, v := range metricsRead.Slice {
 		metricNames = append(metricNames, v.ID)
 	}
 
@@ -470,7 +487,7 @@ func (server *Server) UpdateBatchMetricsJSONHandler(w http.ResponseWriter, r *ht
 
 	server.AuditCh <- auditEntry
 
-	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metricsRead)
+	resultMetrics, err := server.storage.UpdateBatchMetrics(r.Context(), metricsRead.Slice)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
