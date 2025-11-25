@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"metralert/internal/server"
 	"metralert/internal/storage"
@@ -12,7 +13,23 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
+)
+
+func PrintTags() {
+	fmt.Printf(`
+Build version: %s
+Build date: %s
+Build commit: %s
+	`, buildVersion, buildDate, buildCommit)
+}
+
 func main() {
+
+	PrintTags()
 
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, os.Interrupt)

@@ -74,7 +74,6 @@ func (m *MemStorage) ValidateMetric(metric metrics.Metrics) error {
 }
 
 func (m *MemStorage) UpdateMetric(_ context.Context, metric metrics.Metrics) (*metrics.Metrics, error) {
-	// var emptyMetric metrics.Metrics
 	err := m.ValidateMetric(metric)
 	if err != nil {
 		return nil, err
