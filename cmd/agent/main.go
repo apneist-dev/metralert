@@ -6,6 +6,7 @@ import (
 	"metralert/internal/agent"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +16,7 @@ import (
 func main() {
 
 	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -37,7 +38,7 @@ func main() {
 		RateLimit: %d`,
 		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 
-	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true)
+	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true, cfg.CryptoKey)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
 	go metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
 

@@ -3,7 +3,6 @@
 
 package metrics
 
-
 func (rs *Metrics) Reset() {
 	if rs == nil {
 		return

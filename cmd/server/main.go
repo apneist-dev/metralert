@@ -7,6 +7,7 @@ import (
 	"metralert/internal/storage"
 	"os"
 	"os/signal"
+	"syscall"
 
 	serverconfig "metralert/config/server"
 
@@ -32,7 +33,7 @@ func main() {
 	PrintTags()
 
 	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	cfg := serverconfig.Config{}
 	cfg.GetConfig()
@@ -55,7 +56,7 @@ func main() {
 	sugar.Infow("Config applied",
 		"cfg", cfg)
 	go storage.BackupService(cfg.StoreInterval)
-	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar)
+	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar, cfg.CryptoKey)
 	go server.Start()
 	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 
