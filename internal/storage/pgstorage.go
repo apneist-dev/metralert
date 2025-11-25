@@ -61,7 +61,7 @@ func NewPgStorage(databaseAddress string, logger *zap.SugaredLogger) *PgStorage 
 	return &pg
 }
 
-func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics) (metrics.Metrics, error) {
+func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics) (*metrics.Metrics, error) {
 	queryUpdateGauge := `
 		INSERT INTO metrics (id, mtype, value)
     	VALUES ( $1 , 'gauge', $2 )
@@ -89,7 +89,7 @@ func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics
 				metric.ID, metric.Value).Scan(&scannedGauge.ID, &scannedGauge.MType, &scannedGauge.Value)
 		})
 
-		return scannedGauge, err
+		return &scannedGauge, err
 
 	case "counter":
 		var scannedCounter metrics.Metrics
@@ -99,10 +99,10 @@ func (pg *PgStorage) UpdateMetric(reqCtx context.Context, metric metrics.Metrics
 				metric.ID, metric.Delta).Scan(&scannedCounter.ID, &scannedCounter.MType, &scannedCounter.Delta)
 		})
 
-		return scannedCounter, err
+		return &scannedCounter, err
 	default:
 		err := errors.New("invalid Mtype")
-		return metrics.Metrics{}, err
+		return &metrics.Metrics{}, err
 	}
 }
 
@@ -185,7 +185,7 @@ func (pg *PgStorage) UpdateBatchMetrics(reqCtx context.Context, metricsSlice []m
 	return result, errors.Join(errs...)
 }
 
-func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metrics) (metrics.Metrics, bool) {
+func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metrics) (*metrics.Metrics, bool) {
 	queryGetMetric := `
 		SELECT id, mtype, delta, value 
 		FROM metrics WHERE id = $1
@@ -204,7 +204,7 @@ func (pg *PgStorage) GetMetricByName(reqCtx context.Context, metric metrics.Metr
 	if err != nil {
 		ok = false
 	}
-	return result, ok
+	return &result, ok
 }
 
 func (pg *PgStorage) GetMetrics(reqCtx context.Context) (map[string]any, error) {

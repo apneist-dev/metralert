@@ -12,6 +12,11 @@ type Metrics struct {
 }
 
 // generate:reset
+type MetricsGroup struct {
+	Slice []Metrics
+}
+
+// generate:reset
 type AuditMetrics struct {
 	TS          int64    `json:"ts"`
 	MetricNames []string `json:"metrics"`

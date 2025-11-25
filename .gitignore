@@ -30,6 +30,3 @@ metrics_database.json
 auditlog.json
 /bruno
 /autotests
-
-# Generated files
-**/*.gen.go
