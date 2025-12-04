@@ -237,83 +237,97 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 			}
 		}
 	}(&memoryStatistics)
+
+	SendMetrics := func() error {
+		if a.batch {
+			endpoint := a.BaseURL + batchUpdatePath
+			if len(memoryStatistics) == 0 {
+				return nil
+			}
+			jsonData, err := json.Marshal(memoryStatistics)
+			if err != nil {
+				a.logger.Fatalw("unable to marshal []metric")
+			}
+
+			compressedBody, err := gzipCompress(jsonData)
+			if err != nil {
+				a.logger.Fatalw("Unable to compress body")
+			}
+
+			Data := compressedBody
+
+			if a.PublicKeyPath != "" {
+				EncrypredData, err := RetrieveEncrypt(Data, a.PublicKeyPath)
+				if err != nil {
+					return err
+				}
+				Data = EncrypredData
+			}
+
+			compressedBodyReader := bytes.NewReader(Data)
+
+			req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
+			if err != nil {
+				a.logger.Fatalw("Unable to form request")
+			}
+
+			req.Header.Set("Content-Encoding", "gzip")
+			req.Header.Add("Content-Type", "application/json")
+
+			if a.hashKey != "" {
+				buf, err := io.ReadAll(bytes.NewReader(compressedBody))
+				if err != nil {
+					a.logger.Warnf("read body error: %w", err)
+				}
+
+				h := hmac.New(sha256.New, []byte(a.hashKey))
+				h.Write(buf)
+				req.Header.Add("Hash", hex.EncodeToString(h.Sum(nil)))
+			}
+
+			resp, err := a.client.Do(req)
+			if err != nil {
+				a.logger.Infow("Server unreachable", err)
+				return nil
+			}
+			a.logger.Infow("Batch Metrics sent successfully")
+			defer resp.Body.Close()
+		}
+
+		// single metric mode
+		if !a.batch {
+			for _, s := range memoryStatistics {
+				workerIn <- s
+				response := <-workerOut
+
+				if response.err != nil {
+					log.Printf("При отправке метрик произошла ошибка: %v", response.err)
+					continue
+				}
+				a.logger.Infow("Response received",
+					"status", response.response.StatusCode,
+					"Content-Type", response.response.Header.Get("Content-Type"),
+					"Content-Encoding", response.response.Header.Get("Content-Encoding"))
+				response.response.Body.Close()
+			}
+		}
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
+			a.logger.Infoln("Signal received. Shutting down agent.")
+			err := SendMetrics()
+			if err != nil {
+				return err
+			}
+			a.logger.Infoln("All collected metrics are sent")
 			return nil
 		case <-reportTicker.C:
-			// batch mode
-			if a.batch {
-				endpoint := a.BaseURL + batchUpdatePath
-				if len(memoryStatistics) == 0 {
-					continue
-				}
-				jsonData, err := json.Marshal(memoryStatistics)
-				if err != nil {
-					a.logger.Fatalw("unable to marshal []metric")
-				}
-
-				compressedBody, err := gzipCompress(jsonData)
-				if err != nil {
-					a.logger.Fatalw("Unable to compress body")
-				}
-
-				Data := compressedBody
-
-				if a.PublicKeyPath != "" {
-					EncrypredData, err := RetrieveEncrypt(Data, a.PublicKeyPath)
-					if err != nil {
-						return err
-					}
-					Data = EncrypredData
-				}
-
-				compressedBodyReader := bytes.NewReader(Data)
-
-				req, err := http.NewRequest("POST", endpoint, compressedBodyReader)
-				if err != nil {
-					a.logger.Fatalw("Unable to form request")
-				}
-
-				req.Header.Set("Content-Encoding", "gzip")
-				req.Header.Add("Content-Type", "application/json")
-
-				if a.hashKey != "" {
-					buf, err := io.ReadAll(bytes.NewReader(compressedBody))
-					if err != nil {
-						a.logger.Warnf("read body error: %w", err)
-					}
-
-					h := hmac.New(sha256.New, []byte(a.hashKey))
-					h.Write(buf)
-					req.Header.Add("Hash", hex.EncodeToString(h.Sum(nil)))
-				}
-
-				resp, err := a.client.Do(req)
-				if err != nil {
-					a.logger.Infow("Server unreachable", err)
-					continue
-				}
-				a.logger.Infow("Batch Metrics sent successfully")
-				defer resp.Body.Close()
-			}
-
-			// single metric mode
-			if !a.batch {
-				for _, s := range memoryStatistics {
-					workerIn <- s
-					response := <-workerOut
-
-					if response.err != nil {
-						log.Printf("При отправке метрик произошла ошибка: %v", response.err)
-						continue
-					}
-					a.logger.Infow("Response received",
-						"status", response.response.StatusCode,
-						"Content-Type", response.response.Header.Get("Content-Type"),
-						"Content-Encoding", response.response.Header.Get("Content-Encoding"))
-					response.response.Body.Close()
-				}
+			err := SendMetrics()
+			if err != nil {
+				return err
 			}
 		}
 	}
