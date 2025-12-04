@@ -3,7 +3,6 @@ package agentconfig
 import (
 	"log"
 
-	"github.com/spf13/pflag"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -43,7 +42,7 @@ func (cfg *Config) GetConfig() error {
 	flag.String("crypto-key", "", "Public Key")
 	flag.Parse()
 
-	viper.BindPFlags(pflag.CommandLine)
+	viper.BindPFlags(flag.CommandLine)
 
 	// env
 	viper.AutomaticEnv()
