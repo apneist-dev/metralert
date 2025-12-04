@@ -35,9 +35,6 @@ func main() {
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	cfg := serverconfig.Config{}
-	cfg.GetConfig()
-
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		log.Fatal(err)
@@ -45,14 +42,14 @@ func main() {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
+	cfg := serverconfig.Config{}
+	err = cfg.GetConfig()
+	if err != nil {
+		sugar.Fatalln("unable to get config :", err)
+	}
+
 	storage := storage.NewStorage(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
-	// sugar.Infow("Config",
-	// 	"cfg.ServerAddress", cfg.ServerAddress,
-	// 	"cfg.Restore", cfg.Restore,
-	// 	"cfg.FileStoragePath", cfg.FileStoragePath,
-	// 	"cfg.DatabaseAddress", cfg.DatabaseAddress,
-	// 	"cfg.StoreInterval", cfg.StoreInterval,
-	// 	"cfg.HashKey", cfg.HashKey)
+
 	sugar.Infow("Config applied",
 		"cfg", cfg)
 	go storage.BackupService(cfg.StoreInterval)

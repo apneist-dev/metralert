@@ -30,10 +30,10 @@ func main() {
 	cfg := agentconfig.Config{}
 	err = cfg.GetConfig()
 	if err != nil {
-		sugar.Fatalln("unable to read config file:", err)
+		sugar.Fatalln("unable to read get file:", err)
 	}
 
-	log.Printf(`Запущен агент:
+	sugar.Infof(`Запущен агент:
 		ServerAddress %s,
 		PollInterval: %d,
 		ReportInterval: %d,
@@ -42,6 +42,8 @@ func main() {
 
 	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true, cfg.CryptoKey)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
-	metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
-
+	err = metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
+	if err != nil {
+		sugar.Fatalln(err)
+	}
 }

@@ -1,116 +1,109 @@
 package config
 
 import (
-	"encoding/json"
-	"flag"
-	"fmt"
-	"os"
+	"errors"
+	"log"
 	"strconv"
 	"strings"
 
-	"github.com/caarlos0/env/v6"
+	flag "github.com/spf13/pflag"
+
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 type Config struct {
-	ServerAddress   string `env:"ADDRESS" json:"address"`
-	StoreInterval   int    `env:"STORE_INTERVAL" json:"store_interval"`
-	FileStoragePath string `env:"FILE_STORAGE_PATH" json:"store_file"`
-	Restore         bool   `env:"RESTORE" json:"restore"`
-	DatabaseAddress string `env:"DATABASE_DSN" json:"database_dsn"`
-	HashKey         string `env:"KEY" json:"-"`
-	AuditFile       string `env:"AUDIT_FILE" json:"-"`
-	AuditURL        string `env:"AUDIT_URL" json:"-"`
-	CryptoKey       string `env:"CRYPTO_KEY" json:"crypto_key"`
-	ConfigFile      string `env:"CONFIG" json:"-"`
+	ServerAddress   string
+	StoreInterval   int
+	FileStoragePath string
+	Restore         bool
+	DatabaseAddress string
+	HashKey         string
+	AuditFile       string
+	AuditURL        string
+	CryptoKey       string
+	ConfigFile      string
 }
 
-func (cfg *Config) ParseFlags() {
+func (cfg *Config) GetConfig() error {
 
-	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "server url")
-	flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
-	flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
-	flag.BoolVar(&cfg.Restore, "r", true, "restore metrics on startup")
-}
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer logger.Sync()
+	sugar := logger.Sugar()
 
-func (cfg *Config) GetConfig() {
+	//defaults
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
-	var fileCfg Config
+	viper.SetDefault("address", "localhost:8080")
+	viper.SetDefault("store_interval", 300)
 
-	// flag config
-	flag.StringVar(&cfg.ConfigFile, "c", "", "json config file")
-	flag.StringVar(&cfg.ServerAddress, "a", "", "server url")
-	flag.IntVar(&cfg.StoreInterval, "i", 300, "file swap interval")
-	flag.StringVar(&cfg.FileStoragePath, "f", "metrics_database.json", "filename to store metrics")
-	flag.BoolVar(&cfg.Restore, "r", false, "restore metrics on startup")
-	flag.StringVar(&cfg.DatabaseAddress, "d", "", "database dsn")
-	flag.StringVar(&cfg.HashKey, "k", "", "hash key")
-	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path of a file to store audit logs")
-	flag.StringVar(&cfg.AuditURL, "audit-url", "", "path of a file to store audit logs")
-	flag.StringVar(&cfg.CryptoKey, "crypto_key", "", "private key")
+	// flags
+	flag.StringP("config", "c", "", "json config file")
+	flag.StringP("address", "a", "", "server url")
+	flag.IntP("store-interval", "i", 300, "file swap interval")
+	flag.StringP("file-storage-path", "f", "metrics_database.json", "filename to store metrics")
+	flag.BoolP("restore", "r", false, "restore metrics on startup")
+	flag.StringP("database-dsn", "d", "", "database dsn")
+	flag.StringP("key", "k", "", "hash key")
+	flag.String("audit-file", "", "path of a file to store audit logs")
+	flag.String("audit-url", "", "path of a file to store audit logs")
+	flag.String("crypto-key", "", "private key")
 	flag.Parse()
 
-	// env config
-	err := env.Parse(cfg)
+	err = viper.BindPFlags(flag.CommandLine)
 	if err != nil {
-		fmt.Println("не удалось выполнить парсинг переменных окружения")
+		sugar.Warnln("unable to bind flags:", err)
 	}
+
+	// env config
+	viper.AutomaticEnv()
 
 	// json config
-	fmt.Println("reading config file: ", cfg.ConfigFile)
-	if cfg.ConfigFile != "" {
-		data, err := os.ReadFile(cfg.ConfigFile)
+	configFileName := viper.GetString("config")
+	sugar.Infoln("filename is", configFileName)
+	if configFileName != "" {
+		viper.SetConfigType("json")
+		viper.SetConfigName(configFileName)
+		viper.AddConfigPath("./config/server/")
+
+		err = viper.ReadInConfig()
 		if err != nil {
-			fmt.Println("unable to read file", cfg.ConfigFile)
-		}
-		if err = UnmarshalJSON(data, &fileCfg); err != nil {
-			fmt.Println("unable to unmarshal file", cfg.ConfigFile)
+			sugar.Warnln("unable to read file", configFileName, err)
+			return err
 		}
 	}
 
-	if cfg.ServerAddress == "" {
-		cfg.ServerAddress = fileCfg.ServerAddress
-	}
-	if cfg.StoreInterval == 0 {
-		cfg.StoreInterval = fileCfg.StoreInterval
-	}
-	if cfg.FileStoragePath == "" {
-		cfg.FileStoragePath = fileCfg.FileStoragePath
-	}
-	if !cfg.Restore {
-		cfg.Restore = fileCfg.Restore
-	}
-	if cfg.DatabaseAddress == "" {
-		cfg.DatabaseAddress = fileCfg.DatabaseAddress
-	}
+	cfg.ServerAddress = viper.GetString("address")
+	cfg.FileStoragePath = viper.GetString("file-storage-path")
+	cfg.Restore = viper.GetBool("restore")
+	cfg.DatabaseAddress = viper.GetString("database-dsn")
+	cfg.HashKey = viper.GetString("key")
+	cfg.AuditFile = viper.GetString("audit-file")
+	cfg.AuditURL = viper.GetString("audit-url")
+	cfg.CryptoKey = viper.GetString("crypto-key")
+	cfg.ConfigFile = viper.GetString("config")
 
-	// set defaults
-	if cfg.ServerAddress == "" {
-		cfg.ServerAddress = "localhost:8080"
-	}
-	if cfg.StoreInterval == 0 {
-		cfg.StoreInterval = 300
-	}
-
-	// _, StoreIntervalSet := os.LookupEnv("STORE_INTERVAL")
-	// _, RestoreSet := os.LookupEnv("RESTORE")
-
-}
-
-func UnmarshalJSON(data []byte, c *Config) (err error) {
-	type ConfigAlias Config
-
-	aliasValue := &struct {
-		*ConfigAlias
-		StoreInterval string `json:"store_interval"`
-	}{ConfigAlias: (*ConfigAlias)(c)}
-
-	if err = json.Unmarshal(data, aliasValue); err != nil {
-		return
-	}
-	aliasValue.StoreInterval = strings.TrimSuffix(aliasValue.StoreInterval, "s")
-	c.StoreInterval, err = strconv.Atoi(aliasValue.StoreInterval)
+	cfg.StoreInterval, err = IntervalNormalize(viper.GetInt("store-interval"))
 	if err != nil {
 		return err
 	}
-	return
+	return nil
+}
+
+func IntervalNormalize(v any) (int, error) {
+	switch v := v.(type) {
+	case string:
+		vs := strings.TrimSuffix(v, "s")
+		vi, err := strconv.Atoi(vs)
+		if err != nil {
+			return 0, err
+		}
+		return vi, nil
+	case int:
+		return v, nil
+	}
+	return 0, errors.New("unknown type")
 }

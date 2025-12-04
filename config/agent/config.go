@@ -1,7 +1,10 @@
 package agentconfig
 
 import (
+	"errors"
 	"log"
+	"strconv"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -9,13 +12,13 @@ import (
 )
 
 type Config struct {
-	ServerAddress  string `env:"ADDRESS" mapstructure:"address"`
-	ReportInterval int    `env:"REPORT_INTERVAL" mapstructure:"report_interval"`
-	PollInterval   int    `env:"POLL_INTERVAL" mapstructure:"poll_interval"`
-	HashKey        string `env:"KEY" mapstructure:"-"`
-	RateLimit      int    `env:"RATE_LIMIT" mapstructure:"-"`
-	CryptoKey      string `env:"CRYPTO_KEY" mapstructure:"crypto_key"`
-	ConfigFile     string `env:"CONFIG" mapstructure:"-"`
+	ServerAddress  string
+	ReportInterval int
+	PollInterval   int
+	HashKey        string
+	RateLimit      int
+	CryptoKey      string
+	ConfigFile     string
 }
 
 func (cfg *Config) GetConfig() error {
@@ -28,45 +31,74 @@ func (cfg *Config) GetConfig() error {
 	sugar := logger.Sugar()
 
 	//defaults
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+
 	viper.SetDefault("address", "localhost:8080")
-	viper.SetDefault("report_interval", 10)
-	viper.SetDefault("poll_interval", 2)
-	viper.SetDefault("rate_limit", 5)
+	viper.SetDefault("report-interval", 10)
+	viper.SetDefault("poll-interval", 2)
+	viper.SetDefault("rate-limit", 5)
 
 	//flags
 	flag.StringP("address", "a", "", "server url")
-	flag.IntP("report_interval", "r", 0, "reportInterval")
-	flag.IntP("poll_interval", "p", 0, "pollInterval")
+	flag.IntP("report-interval", "r", 0, "reportInterval")
+	flag.IntP("poll-interval", "p", 0, "pollInterval")
 	flag.StringP("key", "k", "", "hash key")
-	flag.IntP("rate_limit", "l", 0, "rate limit")
+	flag.IntP("rate-limit", "l", 0, "rate limit")
 	flag.String("crypto-key", "", "Public Key")
+	flag.StringP("config", "c", "", "configuration file")
 	flag.Parse()
 
-	viper.BindPFlags(flag.CommandLine)
+	err = viper.BindPFlags(flag.CommandLine)
+	if err != nil {
+		sugar.Warnln("unable to bind flags:", err)
+	}
 
 	// env
 	viper.AutomaticEnv()
 
 	// json file
 	configFileName := viper.GetString("config")
+	sugar.Infoln("filename is", configFileName)
 	if configFileName != "" {
+		viper.SetConfigType("json")
 		viper.SetConfigName(configFileName)
-		viper.AddConfigPath("./config/agent")
+		viper.AddConfigPath("./config/agent/")
 
 		err = viper.ReadInConfig()
 		if err != nil {
-			sugar.Warnln("unable to read file", configFileName)
+			sugar.Warnln("unable to read file", configFileName, err)
 			return err
 		}
 	}
 
 	cfg.ServerAddress = viper.GetString("address")
-	cfg.ReportInterval = viper.GetInt("report_interval")
-	cfg.PollInterval = viper.GetInt("poll_interval")
 	cfg.HashKey = viper.GetString("key")
-	cfg.RateLimit = viper.GetInt("rate_limit")
-	cfg.CryptoKey = viper.GetString("crypto_key")
+	cfg.RateLimit = viper.GetInt("rate-limit")
+	cfg.CryptoKey = viper.GetString("crypto-key")
 	cfg.ConfigFile = viper.GetString("config")
 
+	cfg.ReportInterval, err = IntervalNormalize(viper.Get("report-interval"))
+	if err != nil {
+		return err
+	}
+	cfg.PollInterval, err = IntervalNormalize(viper.Get("poll-interval"))
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func IntervalNormalize(v any) (int, error) {
+	switch v := v.(type) {
+	case string:
+		vs := strings.TrimSuffix(v, "s")
+		vi, err := strconv.Atoi(vs)
+		if err != nil {
+			return 0, err
+		}
+		return vi, nil
+	case int:
+		return v, nil
+	}
+	return 0, errors.New("unknown type")
 }
