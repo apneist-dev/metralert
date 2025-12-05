@@ -58,7 +58,7 @@ func (cfg *Config) GetConfig() error {
 
 	// json file
 	configFileName := viper.GetString("config")
-	sugar.Infoln("filename is", configFileName)
+
 	if configFileName != "" {
 		viper.SetConfigType("json")
 		viper.SetConfigName(configFileName)

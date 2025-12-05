@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"metralert/internal/server"
@@ -32,8 +33,8 @@ func main() {
 
 	PrintTags()
 
-	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer cancel()
 
 	logger, err := zap.NewDevelopment()
 	if err != nil {
@@ -57,7 +58,7 @@ func main() {
 	go server.Start()
 	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 
-	<-shutdownCh
+	<-ctx.Done()
 	server.Shutdown()
 	storage.Shutdown()
 
