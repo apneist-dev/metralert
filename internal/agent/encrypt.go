@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -13,7 +14,7 @@ func RetrieveEncrypt(body []byte, publicKeyPath string) ([]byte, error) {
 	publicKeyPEM, err := os.ReadFile(publicKeyPath)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to read public key from file %s: %w", publicKeyPath, err)
 	}
 
 	return Encrypt(body, publicKeyPEM)

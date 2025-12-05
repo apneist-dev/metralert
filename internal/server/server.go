@@ -266,7 +266,7 @@ func (server *Server) DecryptMiddleware(next http.Handler) http.Handler {
 
 		decryptedBody, err := RetrieveDecrypt(body, server.PrivateKeyPath)
 		if err != nil {
-			http.Error(w, "Failed to decrypt body", http.StatusInternalServerError)
+			http.Error(w, "Failed to decrypt body", http.StatusUnauthorized)
 			return
 		}
 
