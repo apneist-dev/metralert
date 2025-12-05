@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"metralert/internal/server"
 	"metralert/internal/storage"
 	"os"
 	"os/signal"
+	"syscall"
 
 	serverconfig "metralert/config/server"
 
@@ -31,11 +33,8 @@ func main() {
 
 	PrintTags()
 
-	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
-
-	cfg := serverconfig.Config{}
-	cfg.GetConfig()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer cancel()
 
 	logger, err := zap.NewDevelopment()
 	if err != nil {
@@ -44,22 +43,22 @@ func main() {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
+	cfg := serverconfig.Config{}
+	err = cfg.GetConfig()
+	if err != nil {
+		sugar.Fatalln("unable to get config :", err)
+	}
+
 	storage := storage.NewStorage(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
-	// sugar.Infow("Config",
-	// 	"cfg.ServerAddress", cfg.ServerAddress,
-	// 	"cfg.Restore", cfg.Restore,
-	// 	"cfg.FileStoragePath", cfg.FileStoragePath,
-	// 	"cfg.DatabaseAddress", cfg.DatabaseAddress,
-	// 	"cfg.StoreInterval", cfg.StoreInterval,
-	// 	"cfg.HashKey", cfg.HashKey)
+
 	sugar.Infow("Config applied",
 		"cfg", cfg)
 	go storage.BackupService(cfg.StoreInterval)
-	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar)
+	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar, cfg.CryptoKey)
 	go server.Start()
 	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 
-	<-shutdownCh
+	<-ctx.Done()
 	server.Shutdown()
 	storage.Shutdown()
 

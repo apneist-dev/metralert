@@ -6,7 +6,7 @@ import (
 	"metralert/internal/agent"
 	"os"
 	"os/signal"
-	"time"
+	"syscall"
 
 	"go.uber.org/zap"
 	"golang.org/x/net/context"
@@ -14,14 +14,11 @@ import (
 
 func main() {
 
-	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt)
+	// shutdownCh := make(chan os.Signal, 1)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	cfg := agentconfig.Config{}
-	cfg.GetConfig()
 
 	logger, err := zap.NewDevelopment()
 	if err != nil {
@@ -30,19 +27,23 @@ func main() {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
-	log.Printf(`Запущен агент:
+	cfg := agentconfig.Config{}
+	err = cfg.GetConfig()
+	if err != nil {
+		sugar.Fatalln("unable to read get file:", err)
+	}
+
+	sugar.Infof(`Запущен агент:
 		ServerAddress %s,
 		PollInterval: %d,
 		ReportInterval: %d,
 		RateLimit: %d`,
 		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 
-	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true)
+	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true, cfg.CryptoKey)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
-	go metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
-
-	<-shutdownCh
-	cancel()
-	sugar.Infow("Shutting down agent")
-	time.Sleep(3 * time.Second)
+	err = metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
+	if err != nil {
+		sugar.Fatalln(err)
+	}
 }
