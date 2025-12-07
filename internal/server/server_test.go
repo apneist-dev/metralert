@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	config "metralert/config/server"
 	"metralert/internal/metrics"
 	"metralert/internal/storage"
 	"net/http"
@@ -49,9 +50,17 @@ func TestServer_UpdateMetricJSONHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger, _ := zap.NewDevelopment()
-			sugar := logger.Sugar()
-			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
-			server := New(tt.args.url, storage, "", sugar, "")
+			storage := storage.NewStorage(config.Config{
+				FileStoragePath: "internal/storage/metrics_database.json",
+				Logger:          logger.Sugar(),
+				Restore:         false,
+			})
+			server := New(config.Config{
+				ServerAddress: tt.args.url,
+				Storage:       storage,
+				Logger:        logger.Sugar(),
+				Restore:       false,
+			})
 			tt.args.requestBody.Delta = (*int64)(&tt.args.metricDelta)
 			jsonBody, err := json.Marshal(tt.args.requestBody)
 			if err != nil {
@@ -73,9 +82,17 @@ func TestServer_UpdateMetricJSONHandler(t *testing.T) {
 
 func ExampleServer_UpdateMetricJSONHandler() {
 	logger, _ := zap.NewDevelopment()
-	sugar := logger.Sugar()
-	storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
-	server := New("http://localhost:8080", storage, "", sugar, "")
+	storage := storage.NewStorage(config.Config{
+		FileStoragePath: "internal/storage/metrics_database.json",
+		Logger:          logger.Sugar(),
+		Restore:         false,
+	})
+	server := New(config.Config{
+		ServerAddress: "http://localhost:8080",
+		Storage:       storage,
+		Logger:        logger.Sugar(),
+		Restore:       false,
+	})
 	jsonBody, err := json.Marshal(metrics.Metrics{
 		ID:    "NewCounter",
 		MType: "counter",
@@ -92,9 +109,17 @@ func ExampleServer_ReadMetricJSONHandler() {
 	var TestDelta int64 = 123
 
 	logger, _ := zap.NewDevelopment()
-	sugar := logger.Sugar()
-	storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
-	server := New("http://localhost:8080", storage, "", sugar, "")
+	storage := storage.NewStorage(config.Config{
+		FileStoragePath: "internal/storage/metrics_database.json",
+		Logger:          logger.Sugar(),
+		Restore:         false,
+	})
+	server := New(config.Config{
+		ServerAddress: "http://localhost:8080",
+		Storage:       storage,
+		Logger:        logger.Sugar(),
+		Restore:       false,
+	})
 	metricsNewCounter := metrics.Metrics{
 		ID:    "NewCounter",
 		MType: "counter",

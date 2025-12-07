@@ -1,6 +1,8 @@
 package agent
 
 import (
+	agentConfig "metralert/config/agent"
+	serverConfig "metralert/config/server"
 	"metralert/internal/metrics"
 	"metralert/internal/server"
 	"metralert/internal/storage"
@@ -66,25 +68,30 @@ func TestAgent_SendPost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// a := &Agent{
-			// 	BaseURL:          tt.fields.agenturl,
-			// 	pollInterval:     tt.fields.pollInterval,
-			// 	reportInterval:   tt.fields.reportInterval,
-			// 	pollCount:        tt.fields.pollCount,
-			// 	memoryStatistics: tt.fields.memoryStatistics,
-			// 	rtm:              tt.fields.rtm,
-			// 	client:           tt.fields.client,
-			// }
 			logger, _ := zap.NewDevelopment()
-			sugar := logger.Sugar()
-			storage := storage.NewStorage("internal/storage/metrics_database.json", false, "", logger.Sugar())
+			storage := storage.NewStorage(serverConfig.Config{
+				FileStoragePath: "internal/storage/metrics_database.json",
+				Logger:          logger.Sugar(),
+				Restore:         false,
+			})
 
-			server := server.New(tt.fields.serverurl, storage, "", sugar, "")
+			server := server.New(serverConfig.Config{
+				ServerAddress: tt.fields.serverurl,
+				Storage:       storage,
+				Logger:        logger.Sugar(),
+				Restore:       false,
+			})
 			go server.Start()
 			time.Sleep(time.Second * 3)
 
 			tt.args.metric.Value = (&tt.args.randValue)
-			a := New(tt.fields.agenturl, tt.fields.pollInterval, tt.fields.reportInterval, "1234567890123456", sugar, true, "")
+			a := New(agentConfig.Config{
+				ServerAddress:  tt.fields.agenturl,
+				PollInterval:   tt.fields.pollInterval,
+				ReportInterval: tt.fields.reportInterval,
+				Logger:         logger.Sugar(),
+				Batch:          true,
+			})
 			a.logger.Info("Agent created successfully", a)
 		})
 	}

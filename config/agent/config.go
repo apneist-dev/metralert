@@ -19,6 +19,10 @@ type Config struct {
 	RateLimit      int
 	CryptoKey      string
 	ConfigFile     string
+	Logger         *zap.SugaredLogger
+	AgentGRPC      bool
+	Batch          bool
+	GRPCPort       string
 }
 
 func (cfg *Config) GetConfig() error {
@@ -28,7 +32,7 @@ func (cfg *Config) GetConfig() error {
 		log.Fatal(err)
 	}
 	defer logger.Sync()
-	sugar := logger.Sugar()
+	cfg.Logger = logger.Sugar()
 
 	//defaults
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
@@ -37,6 +41,9 @@ func (cfg *Config) GetConfig() error {
 	viper.SetDefault("report-interval", 10)
 	viper.SetDefault("poll-interval", 2)
 	viper.SetDefault("rate-limit", 5)
+	viper.SetDefault("agent-grpc", true)
+	viper.SetDefault("batch", true)
+	viper.SetDefault("grpc-port", ":3200")
 
 	//flags
 	flag.StringP("address", "a", "", "server url")
@@ -46,11 +53,13 @@ func (cfg *Config) GetConfig() error {
 	flag.IntP("rate-limit", "l", 0, "rate limit")
 	flag.String("crypto-key", "", "Public Key")
 	flag.StringP("config", "c", "", "configuration file")
+	flag.BoolP("agent-grpc", "g", false, "agent grpc enable")
+	flag.BoolP("batch", "b", false, "batch mode activate")
 	flag.Parse()
 
 	err = viper.BindPFlags(flag.CommandLine)
 	if err != nil {
-		sugar.Warnln("unable to bind flags:", err)
+		cfg.Logger.Warnln("unable to bind flags:", err)
 	}
 
 	// env
@@ -66,16 +75,19 @@ func (cfg *Config) GetConfig() error {
 
 		err = viper.ReadInConfig()
 		if err != nil {
-			sugar.Warnln("unable to read file", configFileName, err)
+			cfg.Logger.Warnln("unable to read file", configFileName, err)
 			return err
 		}
 	}
 
+	cfg.AgentGRPC = viper.GetBool("agent-grpc")
 	cfg.ServerAddress = viper.GetString("address")
 	cfg.HashKey = viper.GetString("key")
 	cfg.RateLimit = viper.GetInt("rate-limit")
 	cfg.CryptoKey = viper.GetString("crypto-key")
 	cfg.ConfigFile = viper.GetString("config")
+	cfg.Batch = viper.GetBool("batch")
+	cfg.GRPCPort = viper.GetString("grpc-port")
 
 	cfg.ReportInterval, err = IntervalNormalize(viper.Get("report-interval"))
 	if err != nil {

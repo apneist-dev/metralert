@@ -40,7 +40,7 @@ func main() {
 		RateLimit: %d`,
 		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 
-	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true, cfg.CryptoKey)
+	metricsAgent := agent.New(cfg)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
 	err = metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
 	if err != nil {
