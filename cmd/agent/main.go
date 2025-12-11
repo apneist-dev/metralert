@@ -14,10 +14,8 @@ import (
 
 func main() {
 
-	// shutdownCh := make(chan os.Signal, 1)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	// ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	logger, err := zap.NewDevelopment()
