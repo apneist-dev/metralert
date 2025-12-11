@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -364,6 +365,11 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 			metrics = append(metrics, &metric)
 		}
 
+		if a.LocalAddress != "" {
+			md := metadata.New(map[string]string{"x-real-ip": a.LocalAddress})
+			ctx = metadata.NewOutgoingContext(ctx, md)
+		}
+
 		response, err := c.UpdateMetrics(ctx, pb.UpdateMetricsRequest_builder{
 			Metrics: metrics,
 		}.Build())
@@ -388,15 +394,16 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 			if a.AgentGRPC {
 				conn, err := grpc.NewClient(a.GRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
 				if err != nil {
-					a.logger.Error("ошибка при установлении соединения с сервером", "error", err)
-					return err
+					a.logger.Infoln("error, while connecting to server", "error", err)
+					continue
 				}
 				defer conn.Close()
 				c := pb.NewMetricsClient(conn)
 
 				err = SendMetricsGRPC(ctx, c)
 				if err != nil {
-					return err
+					a.logger.Infoln("error while sendind metrics", "error", err)
+					continue
 				}
 				continue
 			}

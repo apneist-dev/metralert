@@ -13,21 +13,26 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type ServerGRPC struct {
 	pb.UnimplementedMetricsServer
 
-	address string
-	storage storage.StorageInterface
-	logger  *zap.SugaredLogger
+	address       string
+	storage       storage.StorageInterface
+	logger        *zap.SugaredLogger
+	TrustedSubnet string
 }
 
 func New(cfg config.Config) *ServerGRPC {
 	server := &ServerGRPC{
-		address: cfg.ServerAddress,
-		storage: cfg.Storage,
-		logger:  cfg.Logger,
+		address:       cfg.ServerAddress,
+		storage:       cfg.Storage,
+		logger:        cfg.Logger,
+		TrustedSubnet: cfg.TrustedSubnet,
 	}
 
 	return server
@@ -52,7 +57,7 @@ func (server *ServerGRPC) Start() error {
 		return fmt.Errorf("unable to listen server: %s", err)
 	}
 
-	s := grpc.NewServer()
+	s := grpc.NewServer(grpc.UnaryInterceptor(trustedIPInterceptor(server.TrustedSubnet)))
 
 	pb.RegisterMetricsServer(s, server)
 
@@ -101,4 +106,26 @@ func ConvertMetricReqToMetric(req *pb.UpdateMetricsRequest) ([]metrics.Metrics, 
 		return nil, errors.New("got empty metrics slice while converting")
 	}
 	return metricsSlice, nil
+}
+
+func trustedIPInterceptor(trustedIP string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+
+		var ip string
+
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			values := md.Get("x-real-ip")
+			if len(values) > 0 {
+				ip = values[0]
+			}
+			if len(values) == 0 {
+				return nil, status.Error(codes.PermissionDenied, "missing souce ip")
+			}
+			if ip != trustedIP {
+				return nil, status.Error(codes.PermissionDenied, "permission is denied from your IP")
+			}
+		}
+
+		return handler(ctx, req)
+	}
 }
