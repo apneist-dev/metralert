@@ -14,10 +14,8 @@ import (
 
 func main() {
 
-	// shutdownCh := make(chan os.Signal, 1)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
-	// ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	logger, err := zap.NewDevelopment()
@@ -40,7 +38,7 @@ func main() {
 		RateLimit: %d`,
 		cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 
-	metricsAgent := agent.New(cfg.ServerAddress, cfg.PollInterval, cfg.ReportInterval, cfg.HashKey, sugar, true, cfg.CryptoKey)
+	metricsAgent := agent.New(cfg)
 	metricsAgent.StartSendPostWorkers(cfg.RateLimit)
 	err = metricsAgent.SendAllMetrics(ctx, metricsAgent.CollectRuntimeMetrics(), metricsAgent.CollectGopsutilMetrics(), metricsAgent.WorkerChanIn, metricsAgent.WorkerChanOut)
 	if err != nil {

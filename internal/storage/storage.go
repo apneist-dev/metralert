@@ -2,9 +2,8 @@ package storage
 
 import (
 	"context"
+	config "metralert/config/server"
 	"metralert/internal/metrics"
-
-	"go.uber.org/zap"
 )
 
 type StorageInterface interface {
@@ -17,11 +16,11 @@ type StorageInterface interface {
 	Shutdown() error
 }
 
-func NewStorage(fileStoragePath string, recover bool, databaseAddress string, logger *zap.SugaredLogger) StorageInterface {
-	switch databaseAddress {
+func NewStorage(cfg config.Config) StorageInterface {
+	switch cfg.DatabaseAddress {
 	case "":
-		return NewMemstorage(fileStoragePath, recover, logger)
+		return NewMemstorage(cfg.FileStoragePath, cfg.Restore, cfg.Logger)
 	default:
-		return NewPgStorage(databaseAddress, logger)
+		return NewPgStorage(cfg.DatabaseAddress, cfg.Logger)
 	}
 }

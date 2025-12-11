@@ -1,8 +1,10 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"log"
+	"metralert/internal/metrics"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 )
 
 type Config struct {
+	ServerGRPC      bool
 	ServerAddress   string
 	StoreInterval   int
 	FileStoragePath string
@@ -23,6 +26,19 @@ type Config struct {
 	AuditURL        string
 	CryptoKey       string
 	ConfigFile      string
+	TrustedSubnet   string
+	Logger          *zap.SugaredLogger
+	Storage         StorageInterface
+}
+
+type StorageInterface interface {
+	UpdateMetric(ctx context.Context, metric metrics.Metrics) (*metrics.Metrics, error)
+	UpdateBatchMetrics(ctx context.Context, metrics []metrics.Metrics) ([]metrics.Metrics, error)
+	GetMetricByName(ctx context.Context, metric metrics.Metrics) (*metrics.Metrics, bool)
+	GetMetrics(ctx context.Context) (map[string]any, error)
+	PingDatabase(ctx context.Context) error
+	BackupService(storeInterval int) error
+	Shutdown() error
 }
 
 func (cfg *Config) GetConfig() error {
@@ -32,13 +48,14 @@ func (cfg *Config) GetConfig() error {
 		log.Fatal(err)
 	}
 	defer logger.Sync()
-	sugar := logger.Sugar()
+	cfg.Logger = logger.Sugar()
 
 	//defaults
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
 	viper.SetDefault("address", "localhost:8080")
-	viper.SetDefault("store_interval", 300)
+	viper.SetDefault("store-interval", 300)
+	viper.SetDefault("server-grpc", true)
 
 	// flags
 	flag.StringP("config", "c", "", "json config file")
@@ -51,11 +68,13 @@ func (cfg *Config) GetConfig() error {
 	flag.String("audit-file", "", "path of a file to store audit logs")
 	flag.String("audit-url", "", "path of a file to store audit logs")
 	flag.String("crypto-key", "", "private key")
+	flag.StringP("trusted-subnet", "t", "", "trusted subnet")
+	flag.BoolP("server-grpc", "g", false, "server grpc enable")
 	flag.Parse()
 
 	err = viper.BindPFlags(flag.CommandLine)
 	if err != nil {
-		sugar.Warnln("unable to bind flags:", err)
+		cfg.Logger.Warnln("unable to bind flags:", err)
 	}
 
 	// env config
@@ -71,11 +90,12 @@ func (cfg *Config) GetConfig() error {
 
 		err = viper.ReadInConfig()
 		if err != nil {
-			sugar.Warnln("unable to read file", configFileName, err)
+			cfg.Logger.Warnln("unable to read file", configFileName, err)
 			return err
 		}
 	}
 
+	cfg.ServerGRPC = viper.GetBool("server-grpc")
 	cfg.ServerAddress = viper.GetString("address")
 	cfg.FileStoragePath = viper.GetString("file-storage-path")
 	cfg.Restore = viper.GetBool("restore")
@@ -85,6 +105,7 @@ func (cfg *Config) GetConfig() error {
 	cfg.AuditURL = viper.GetString("audit-url")
 	cfg.CryptoKey = viper.GetString("crypto-key")
 	cfg.ConfigFile = viper.GetString("config")
+	cfg.TrustedSubnet = viper.GetString("trusted-subnet")
 
 	cfg.StoreInterval, err = IntervalNormalize(viper.GetInt("store-interval"))
 	if err != nil {

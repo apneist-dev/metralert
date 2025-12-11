@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	config "metralert/config/server"
 	"metralert/internal/metrics"
 	"metralert/internal/reset"
 	"metralert/internal/storage"
@@ -40,6 +42,7 @@ type Server struct {
 	MetricPool      *reset.PoolNaive[*metrics.Metrics]
 	BatchMetricPool *reset.PoolNaive[*metrics.MetricsGroup]
 	PrivateKeyPath  string
+	TrustedSubnet   string
 }
 
 // New creates and configures a new Server instance with the specified address, storage repository,
@@ -53,12 +56,12 @@ type Server struct {
 //
 // Returns:
 //   - A pointer to the newly created Server instance
-func New(address string, repo storage.StorageInterface, hashKey string, logger *zap.SugaredLogger, PrivateKeyPath string) *Server {
+func New(cfg config.Config) *Server {
 	s := &Server{}
 	s.Router = chi.NewRouter()
-	s.Router.Use(s.loggingMiddleware, s.verifyHashMiddleware, s.hashMiddleware)
+	s.Router.Use(s.loggingMiddleware, s.verifyHashMiddleware, s.hashMiddleware, s.verifyTrustedSubnetMiddleware)
 
-	s.PrivateKeyPath = PrivateKeyPath
+	s.PrivateKeyPath = cfg.CryptoKey
 
 	if s.PrivateKeyPath != "" {
 		s.Router.Use(s.DecryptMiddleware)
@@ -78,12 +81,13 @@ func New(address string, repo storage.StorageInterface, hashKey string, logger *
 
 	s.Router.Mount("/debug/pprof", http.DefaultServeMux)
 
-	s.storage = repo
-	s.logger = logger
-	s.hashKey = hashKey
+	s.storage = cfg.Storage
+	s.logger = cfg.Logger
+	s.hashKey = cfg.HashKey
+	s.TrustedSubnet = cfg.TrustedSubnet
 
 	s.HTTPServer = &http.Server{
-		Addr:    address,
+		Addr:    cfg.ServerAddress,
 		Handler: s.Router,
 	}
 	s.AuditCh = make(chan metrics.AuditMetrics, 50)
@@ -274,6 +278,34 @@ func (server *Server) DecryptMiddleware(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(decryptedBody))
 
 		next.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(logFn)
+}
+
+func (server *Server) verifyTrustedSubnetMiddleware(next http.Handler) http.Handler {
+	logFn := func(w http.ResponseWriter, r *http.Request) {
+		if server.TrustedSubnet == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		receivedFromIP := r.Header.Get("X-Real-IP")
+		server.logger.Info("Headers ", r.Header)
+		server.logger.Info("Received from IP. Info in header: ", receivedFromIP)
+
+		ok := net.ParseIP(receivedFromIP)
+		if ok == nil {
+			http.Error(w, "incorrect IP address", http.StatusForbidden)
+			return
+		}
+
+		if server.TrustedSubnet != receivedFromIP {
+			http.Error(w, "IP address is not trusted", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+
 	}
 	return http.HandlerFunc(logFn)
 }

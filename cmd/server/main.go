@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"metralert/internal/server"
+	"metralert/internal/servergrpc"
 	"metralert/internal/storage"
 	"os"
 	"os/signal"
@@ -49,17 +50,26 @@ func main() {
 		sugar.Fatalln("unable to get config :", err)
 	}
 
-	storage := storage.NewStorage(cfg.FileStoragePath, cfg.Restore, cfg.DatabaseAddress, sugar)
+	cfg.Storage = storage.NewStorage(cfg)
 
 	sugar.Infow("Config applied",
 		"cfg", cfg)
-	go storage.BackupService(cfg.StoreInterval)
-	server := server.New(cfg.ServerAddress, storage, cfg.HashKey, sugar, cfg.CryptoKey)
-	go server.Start()
-	go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
 
-	<-ctx.Done()
-	server.Shutdown()
-	storage.Shutdown()
+	if cfg.ServerGRPC {
+		server := servergrpc.New(cfg)
+		go server.Start()
+
+		<-ctx.Done()
+	}
+
+	if !cfg.ServerGRPC {
+		go cfg.Storage.BackupService(cfg.StoreInterval)
+		server := server.New(cfg)
+		go server.Start()
+		go server.AuditLogger(cfg.AuditFile, cfg.AuditURL)
+		<-ctx.Done()
+		server.Shutdown()
+	}
+	cfg.Storage.Shutdown()
 
 }

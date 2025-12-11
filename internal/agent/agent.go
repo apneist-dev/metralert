@@ -8,9 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	config "metralert/config/agent"
 	"metralert/internal/metrics"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -18,8 +21,13 @@ import (
 	"sync"
 	"time"
 
+	pb "metralert/internal/proto"
+
 	"github.com/hashicorp/go-retryablehttp"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -30,6 +38,7 @@ const (
 
 // Agent представляет агент для сбора и отправки метрик.
 type Agent struct {
+	GRPCPort string
 	// BaseURL - базовый URL сервера для отправки метрик.
 	BaseURL string
 	// pollInterval - интервал опроса метрик в секундах.
@@ -60,6 +69,8 @@ type Agent struct {
 		err      error
 	}
 	PublicKeyPath string
+	LocalAddress  string
+	AgentGRPC     bool
 }
 
 // New создает новый экземпляр Agent.
@@ -69,13 +80,13 @@ type Agent struct {
 // hashKey - ключ для вычисления хеша тела запроса.
 // logger - логгер для записи логов.
 // batch - флаг, указывающий, использовать ли пакетную отправку метрик.
-func New(address string, pollInterval int, reportInterval int, hashKey string, logger *zap.SugaredLogger, batch bool, publicKeyPath string) *Agent {
-	if !strings.Contains(address, "http") {
-		address = "http://" + address
+func New(cfg config.Config) *Agent {
+	if !strings.Contains(cfg.ServerAddress, "http") {
+		cfg.ServerAddress = "http://" + cfg.ServerAddress
 	}
-	destinationAddress, err := url.ParseRequestURI(address)
+	destinationAddress, err := url.ParseRequestURI(cfg.ServerAddress)
 	if err != nil {
-		logger.Fatalw("Invalid URL:", err)
+		cfg.Logger.Fatalw("Invalid URL:", err)
 	}
 	transport := &http.Transport{
 		DisableCompression: false,
@@ -91,6 +102,11 @@ func New(address string, pollInterval int, reportInterval int, hashKey string, l
 
 	standardClient := *retryClient.StandardClient()
 
+	localAddress, err := FindOutIP(cfg.ServerAddress)
+	if err != nil {
+		cfg.Logger.Fatalln("unable to find local ip: ", err)
+	}
+
 	workerChanIn := make(chan metrics.Metrics, metricsMax)
 	workerChanOut := make(chan struct {
 		response *http.Response
@@ -98,20 +114,23 @@ func New(address string, pollInterval int, reportInterval int, hashKey string, l
 	}, metricsMax)
 
 	return &Agent{
+		GRPCPort:         cfg.GRPCPort,
 		BaseURL:          destinationAddress.String(),
-		pollInterval:     pollInterval,
-		reportInterval:   reportInterval,
+		pollInterval:     cfg.PollInterval,
+		reportInterval:   cfg.ReportInterval,
 		pollCount:        metrics.Counter(0),
 		mutex:            sync.Mutex{},
 		memoryStatistics: []metrics.Metrics{},
 		rtm:              runtime.MemStats{},
 		client:           standardClient,
-		logger:           logger,
-		batch:            batch,
-		hashKey:          hashKey,
+		logger:           cfg.Logger,
+		batch:            cfg.Batch,
+		hashKey:          cfg.HashKey,
 		WorkerChanIn:     workerChanIn,
 		WorkerChanOut:    workerChanOut,
-		PublicKeyPath:    publicKeyPath,
+		PublicKeyPath:    cfg.CryptoKey,
+		LocalAddress:     localAddress,
+		AgentGRPC:        cfg.AgentGRPC,
 	}
 }
 
@@ -179,6 +198,8 @@ func (a *Agent) SendPostWorker(id int, jobs chan metrics.Metrics, results chan s
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Add("Content-Type", "application/json")
 
+		req.Header.Add("X-Real-IP", a.LocalAddress)
+
 		if a.hashKey != "" {
 			h := hmac.New(sha256.New, []byte(a.hashKey))
 			h.Write(compressedBody)
@@ -186,6 +207,8 @@ func (a *Agent) SendPostWorker(id int, jobs chan metrics.Metrics, results chan s
 			req.Header.Add("Hash", hash)
 			a.logger.Infof("Hash is %s", hash)
 		}
+
+		a.logger.Infoln("req: ", req)
 
 		resp, err := a.client.Do(req)
 		if err != nil {
@@ -274,6 +297,8 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 			req.Header.Set("Content-Encoding", "gzip")
 			req.Header.Add("Content-Type", "application/json")
 
+			req.Header.Add("X-Real-IP", a.LocalAddress)
+
 			if a.hashKey != "" {
 				buf, err := io.ReadAll(bytes.NewReader(compressedBody))
 				if err != nil {
@@ -284,6 +309,8 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 				h.Write(buf)
 				req.Header.Add("Hash", hex.EncodeToString(h.Sum(nil)))
 			}
+
+			a.logger.Infoln("req: ", req.Header)
 
 			resp, err := a.client.Do(req)
 			if err != nil {
@@ -314,6 +341,45 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 		return nil
 	}
 
+	SendMetricsGRPC := func(ctx context.Context, c pb.MetricsClient) error {
+		metrics := make([]*pb.Metric, 0, len(memoryStatistics))
+		for _, m := range memoryStatistics {
+
+			var metric pb.Metric
+
+			if m.Delta != nil {
+				metric = *pb.Metric_builder{
+					Id:    m.ID,
+					Type:  *pb.Metric_COUNTER.Enum(),
+					Delta: *m.Delta,
+				}.Build()
+			}
+			if m.Value != nil {
+				metric = *pb.Metric_builder{
+					Id:    m.ID,
+					Type:  *pb.Metric_GAUGE.Enum(),
+					Value: *m.Value,
+				}.Build()
+
+			}
+			metrics = append(metrics, &metric)
+		}
+
+		if a.LocalAddress != "" {
+			md := metadata.New(map[string]string{"x-real-ip": a.LocalAddress})
+			ctx = metadata.NewOutgoingContext(ctx, md)
+		}
+
+		response, err := c.UpdateMetrics(ctx, pb.UpdateMetricsRequest_builder{
+			Metrics: metrics,
+		}.Build())
+		if err != nil {
+			return fmt.Errorf("unable to update metrics: %s", err)
+		}
+		a.logger.Infoln("response received", response.String())
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -325,10 +391,42 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 			a.logger.Infoln("All collected metrics are sent")
 			return nil
 		case <-reportTicker.C:
+			if a.AgentGRPC {
+				conn, err := grpc.NewClient(a.GRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					a.logger.Infoln("error, while connecting to server", "error", err)
+					continue
+				}
+				defer conn.Close()
+				c := pb.NewMetricsClient(conn)
+
+				err = SendMetricsGRPC(ctx, c)
+				if err != nil {
+					a.logger.Infoln("error while sendind metrics", "error", err)
+					continue
+				}
+				continue
+			}
 			err := SendMetrics()
 			if err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func FindOutIP(serverAddress string) (string, error) {
+	if strings.Contains(serverAddress, "http://") {
+		serverAddress = strings.TrimPrefix(serverAddress, "http://")
+	}
+	serverAddress = strings.TrimRight(serverAddress, ":")
+
+	c, err := net.Dial("udp4", serverAddress)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+
+	addr := c.LocalAddr().(*net.UDPAddr).IP.String()
+	return addr, nil
 }
