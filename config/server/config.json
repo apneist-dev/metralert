@@ -1,0 +1,8 @@
+{
+    "address": "localhost:8080",
+    "restore": true,
+    "store_interval": "300s",
+    "store_file": "",
+    "database_dsn": "postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable",
+    "crypto_key": "private.pem"
+}
