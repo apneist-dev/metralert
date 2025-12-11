@@ -417,7 +417,7 @@ func (a *Agent) SendAllMetrics(ctx context.Context, memIn chan []metrics.Metrics
 
 func FindOutIP(serverAddress string) (string, error) {
 	if strings.Contains(serverAddress, "http://") {
-		serverAddress = strings.TrimLeft(serverAddress, "http://")
+		serverAddress = strings.TrimPrefix(serverAddress, "http://")
 	}
 	serverAddress = strings.TrimRight(serverAddress, ":")
 
